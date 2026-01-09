@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/../apps/web-shell"
+npm install
+npm run dev -- --port 5173
