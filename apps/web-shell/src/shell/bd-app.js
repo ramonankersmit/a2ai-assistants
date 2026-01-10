@@ -468,27 +468,35 @@ export class BdApp extends LitElement {
 
             ${this._renderStatus()}
 
-            <!-- 3 blocks on one row -->
-            <div class="tabs">
-              <div class="tab">
-                <h3>Zaakoverzicht</h3>
+            <!-- 3 blocks: force perfect alignment -->
+            <div
+              class="tabs"
+              style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; margin-top: 14px;"
+            >
+              <div class="tab" style="display:flex; flex-direction:column; height:100%; min-height:240px;">
+                <h3 style="margin-top:0;">Zaakoverzicht</h3>
                 <div><b>Type:</b> ${overview.type || '-'}</div>
                 <div style="margin-top:6px;"><b>Reden:</b> ${overview.reden || '-'}</div>
                 <div style="margin-top:10px;"><b>Belangstelling:</b> ${overview.bedrag ? 'Bedrag ' + overview.bedrag : 'Inkomensdaling'}</div>
+                <div style="flex:1;"></div>
               </div>
 
-              <div class="tab">
-                <h3>Belangrijke Punten</h3>
-                <ul class="list">${(keyPoints || []).map(x => html`<li>${x}</li>`)}</ul>
+              <div class="tab" style="display:flex; flex-direction:column; height:100%; min-height:240px;">
+                <h3 style="margin-top:0;">Belangrijke Punten</h3>
+                <ul class="list" style="margin-top:10px; flex:1;">
+                  ${(keyPoints || []).map(x => html`<li>${x}</li>`)}
+                </ul>
               </div>
 
-              <div class="tab">
-                <h3>Aanbevolen Acties</h3>
-                <ul class="list">${(actions || []).map(x => html`<li>${x}</li>`)}</ul>
+              <div class="tab" style="display:flex; flex-direction:column; height:100%; min-height:240px;">
+                <h3 style="margin-top:0;">Aanbevolen Acties</h3>
+                <ul class="list" style="margin-top:10px; flex:1;">
+                  ${(actions || []).map(x => html`<li>${x}</li>`)}
+                </ul>
               </div>
             </div>
 
-            <!-- Concept response as full-width block UNDER the row -->
+            <!-- Concept response full-width UNDER the row -->
             <div class="card" style="margin-top:14px;">
               <div class="card-body">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
