@@ -11,6 +11,7 @@ export class BdApp extends LitElement {
     title: { type: String },
     model: { type: Object },
     connected: { type: Boolean },
+    statusHistory: { type: Array },
   };
 
   constructor() {
@@ -21,6 +22,9 @@ export class BdApp extends LitElement {
     this.model = { status: { loading: false, message: '', step: '', lastRefresh: '' }, results: [] };
     this.connected = false;
     this._es = null;
+
+    // Client-side history of status updates (most recent last)
+    this.statusHistory = [];
   }
 
   createRenderRoot() { return this; } // use global CSS
@@ -55,15 +59,46 @@ export class BdApp extends LitElement {
     };
   }
 
+  _pushStatusHistory(nextModel) {
+    const msg = getByPointer(nextModel, '/status/message') || '';
+    const step = getByPointer(nextModel, '/status/step') || '';
+    const lastRaw = getByPointer(nextModel, '/status/lastRefresh') || '';
+
+    // Only log meaningful updates
+    const message = String(msg || '').trim();
+    const stepNorm = String(step || '').trim();
+    if (!message && !stepNorm) return;
+
+    // Derive a timestamp label
+    const ts = this._formatTimestamp(lastRaw) !== '—'
+      ? this._formatTimestamp(lastRaw)
+      : this._formatTimestamp(new Date().toISOString());
+
+    const lastEntry = this.statusHistory.length ? this.statusHistory[this.statusHistory.length - 1] : null;
+    if (lastEntry && lastEntry.message === message && lastEntry.step === stepNorm) return;
+
+    const next = [...this.statusHistory, { ts, message, step: stepNorm }];
+
+    // Keep only last 6
+    this.statusHistory = next.slice(-6);
+  }
+
   _handleA2UI(msg) {
     if (msg.kind === 'session/created') {
       this.sessionId = msg.sessionId;
+      // Reset history for a fresh session
+      this.statusHistory = [];
       return;
     }
     if (msg.kind === 'surface/open') {
       this.surfaceId = msg.surfaceId;
       this.title = msg.title || this.title;
       this.model = msg.dataModel || this.model;
+
+      // Reset history when switching surfaces (keeps it relevant and small)
+      this.statusHistory = [];
+      this._pushStatusHistory(this.model);
+
       this.requestUpdate();
       return;
     }
@@ -72,7 +107,13 @@ export class BdApp extends LitElement {
         // We keep it simple: only apply to active surface
         return;
       }
-      this.model = applyPatches(structuredClone(this.model), msg.patches || []);
+
+      const nextModel = applyPatches(structuredClone(this.model), msg.patches || []);
+      this.model = nextModel;
+
+      // Maintain client-side mini-log for progressive updates
+      this._pushStatusHistory(nextModel);
+
       this.requestUpdate();
       return;
     }
@@ -212,6 +253,17 @@ export class BdApp extends LitElement {
         <div>
           <div><span class="pill">${loading ? 'Bezig' : 'Status'}</span> ${message}</div>
           <div class="small-muted">Step: ${step} · ${last}</div>
+
+          ${this.statusHistory && this.statusHistory.length
+            ? html`
+              <div class="small-muted" style="margin-top:8px; display:grid; gap:4px;">
+                ${this.statusHistory.map(h => html`
+                  <div>• ${h.ts} — ${h.message}${h.step ? ` (${h.step})` : ''}</div>
+                `)}
+              </div>
+            `
+            : ''
+          }
         </div>
       </div>
     `;
