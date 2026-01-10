@@ -181,7 +181,6 @@ export class BdApp extends LitElement {
   }
 
   _formatTimestamp(value) {
-    // Accept ISO strings or already-formatted timestamps. Return a stable, human-readable NL format.
     if (!value) return '—';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
@@ -205,20 +204,14 @@ export class BdApp extends LitElement {
   }
 
   _normalizeText(maybeObjectOrString) {
-    // 1) plain strings
     if (typeof maybeObjectOrString === 'string') {
       const s = maybeObjectOrString.trim();
-
-      // If it looks like a python dict string: {'code': 'R0', 'text': '...'}
-      // Extract 'text' and optionally 'code'
       const mText = s.match(/'text'\s*:\s*'([^']+)'/);
       const mCode = s.match(/'code'\s*:\s*'([^']+)'/);
       if (mText) {
         const code = mCode ? mCode[1] : '';
         return code ? `${code} — ${mText[1]}` : mText[1];
       }
-
-      // If it looks like JSON with text/code
       if ((s.startsWith('{') && s.endsWith('}')) && (s.includes('"text"') || s.includes('"code"'))) {
         try {
           const obj = JSON.parse(s);
@@ -228,14 +221,12 @@ export class BdApp extends LitElement {
             return code ? `${code} — ${text}` : text;
           }
         } catch {
-          // fall through
+          // ignore
         }
       }
-
       return s;
     }
 
-    // 2) objects like {code, text} (common for MCP risk_notes)
     if (maybeObjectOrString && typeof maybeObjectOrString === 'object') {
       const code = maybeObjectOrString.code ? String(maybeObjectOrString.code) : '';
       const text = maybeObjectOrString.text
@@ -244,8 +235,21 @@ export class BdApp extends LitElement {
       return code ? `${code} — ${text}` : text;
     }
 
-    // 3) other primitives
     return String(maybeObjectOrString ?? '');
+  }
+
+  _draftSourceFromText(draft) {
+    const s = String(draft || '');
+    if (s.startsWith('[Bron: Gemini]')) return 'gemini';
+    if (s.startsWith('[Bron: Fallback]')) return 'fallback';
+    return '';
+  }
+
+  _stripDraftSourcePrefix(draft) {
+    const s = String(draft || '');
+    if (s.startsWith('[Bron: Gemini]')) return s.replace('[Bron: Gemini]\n', '').replace('[Bron: Gemini]', '').trim();
+    if (s.startsWith('[Bron: Fallback]')) return s.replace('[Bron: Fallback]\n', '').replace('[Bron: Fallback]', '').trim();
+    return s;
   }
 
   _renderStatus() {
@@ -321,8 +325,8 @@ export class BdApp extends LitElement {
 
               <div>Jaar:</div>
               <select class="input" id="jaar">
+                <option>2025</option>
                 <option>2024</option>
-                <option>2023</option>
               </select>
 
               <div>Gezinssituatie:</div>
@@ -335,7 +339,9 @@ export class BdApp extends LitElement {
                 <input type="checkbox" id="lov" checked />
                 <div>Loon of vermogen:</div>
               </div>
-              <div style="display:flex;justify-content:flex-end;">
+
+              <div style="display:flex;justify-content:flex-end; gap:10px;">
+                <button class="link" style="padding:0;" ?disabled=${loading} @click=${this._toeslagenReset}>Reset</button>
                 <button class="btn" style="min-width:140px;" ?disabled=${loading} @click=${this._toeslagenCheck}>Check</button>
               </div>
             </div>
@@ -410,12 +416,27 @@ export class BdApp extends LitElement {
     `;
   }
 
+  _toeslagenReset() {
+    const loading = !!getByPointer(this.model, '/status/loading');
+    if (loading) return;
+
+    const regelingEl = this.renderRoot.querySelector('#regeling');
+    const jaarEl = this.renderRoot.querySelector('#jaar');
+    const situatieEl = this.renderRoot.querySelector('#situatie');
+    const lovEl = this.renderRoot.querySelector('#lov');
+
+    if (regelingEl) regelingEl.value = 'Huurtoeslag';
+    if (jaarEl) jaarEl.value = '2025';
+    if (situatieEl) situatieEl.value = 'Alleenstaand';
+    if (lovEl) lovEl.checked = true;
+  }
+
   _toeslagenCheck() {
     const loading = !!getByPointer(this.model, '/status/loading');
     if (loading) return;
 
     const regeling = this.renderRoot.querySelector('#regeling')?.value || 'Huurtoeslag';
-    const jaar = parseInt(this.renderRoot.querySelector('#jaar')?.value || '2024', 10);
+    const jaar = parseInt(this.renderRoot.querySelector('#jaar')?.value || '2025', 10);
     const situatie = this.renderRoot.querySelector('#situatie')?.value || 'Alleenstaand';
     const lov = this.renderRoot.querySelector('#lov')?.checked ?? true;
 
@@ -428,10 +449,22 @@ export class BdApp extends LitElement {
     const loading = !!getByPointer(this.model, '/status/loading');
     const results = (getByPointer(this.model, '/results') || []);
     const r0 = Array.isArray(results) && results.length ? results[0] : null;
+
     const overview = r0?.overview || {};
     const keyPoints = r0?.key_points || [];
     const actions = r0?.actions || [];
-    const draft = r0?.draft_response || '';
+    const draftRaw = r0?.draft_response || '';
+
+    const draft_source =
+      (r0?.draft_source) ||
+      this._draftSourceFromText(draftRaw);
+
+    const draft = this._stripDraftSourcePrefix(draftRaw);
+
+    const badgeLabel = draft_source === 'gemini' ? 'Gemini' : (draft_source === 'fallback' ? 'Fallback' : '');
+    const badgeTitle = draft_source === 'gemini'
+      ? 'Concepttekst is opgesteld met Gemini'
+      : (draft_source === 'fallback' ? 'Concepttekst is opgesteld met fallback' : '');
 
     return html`
       <div class="container">
@@ -496,8 +529,11 @@ export class BdApp extends LitElement {
               </div>
 
               <div class="tab">
-                <h3>Concept Reactie</h3>
-                <div style="white-space:pre-wrap;">${draft || '—'}</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                  <h3 style="margin:0;">Concept Reactie</h3>
+                  ${badgeLabel ? html`<div class="pill" title="${badgeTitle}">${badgeLabel}</div>` : ''}
+                </div>
+                <div style="white-space:pre-wrap; margin-top:10px;">${draft || '—'}</div>
                 <div class="small-muted" style="margin-top:10px;">Dit is een voorlopige reactie (demo).</div>
               </div>
             </div>
