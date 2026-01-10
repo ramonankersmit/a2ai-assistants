@@ -130,11 +130,38 @@ export class BdApp extends LitElement {
     `;
   }
 
+  _formatTimestamp(value) {
+    // Accept ISO strings or already-formatted timestamps. Return a stable, human-readable NL format.
+    if (!value) return '—';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    const s = d.toLocaleString('nl-NL', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    return s.replace(',', '');
+  }
+
+  _priorityIcon(priority) {
+    const p = String(priority || '').toLowerCase();
+    if (p.includes('hoog') || p.includes('high')) return '▲';
+    if (p.includes('midden') || p.includes('medium')) return '●';
+    if (p.includes('laag') || p.includes('low')) return '▼';
+    return '•';
+  }
+
   _renderStatus() {
     const loading = !!getByPointer(this.model, '/status/loading');
-    const message = getByPointer(this.model, '/status/message') || '';
-    const step = getByPointer(this.model, '/status/step') || '';
-    const last = getByPointer(this.model, '/status/lastRefresh') || '';
+    const message = getByPointer(this.model, '/status/message') || '—';
+    const stepRaw = getByPointer(this.model, '/status/step') || '';
+    const lastRaw = getByPointer(this.model, '/status/lastRefresh') || '';
+    const step = stepRaw || (loading ? 'Bezig…' : '—');
+    const last = this._formatTimestamp(lastRaw);
+
     return html`
       <div class="status">
         <div class="status-dot" style=${loading ? '' : 'background:#9ca3af; box-shadow:0 0 0 3px rgba(156,163,175,0.2);'}></div>
@@ -252,7 +279,7 @@ export class BdApp extends LitElement {
                 <div class="quote">
                   <div style="display:flex;justify-content:space-between;gap:10px;">
                     <div><b>${it.category}</b>: ${it.text}</div>
-                    <div class="pill">${it.priority}</div>
+                    <div class="pill">${this._priorityIcon(it.priority)} ${it.priority}</div>
                   </div>
                   <div class="small-muted" style="margin-top:6px;">${it.b1_explanation}</div>
                 </div>
