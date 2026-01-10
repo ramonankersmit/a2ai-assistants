@@ -1,6 +1,6 @@
 import { LitElement, html } from 'lit';
 import { applyPatches, getByPointer } from './jsonpatch.js';
-import { clipboardIconSvg, pencilIconSvg, logoSvg, listIconSvg, menuSvg } from './icons.js';
+import { clipboardIconSvg, pencilIconSvg, logoSvg, menuSvg } from './icons.js';
 
 const ORCH_BASE = 'http://localhost:10002';
 
