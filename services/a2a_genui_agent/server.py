@@ -21,16 +21,15 @@ GEMINI_API_VERSION = os.getenv("GEMINI_API_VERSION", "v1beta").strip()
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
 
 GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "900"))
-TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.4"))
+TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.2"))
 
 log = logging.getLogger("a2a_genui_agent")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-# Avoid leaking key in httpx logs
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-app = FastAPI(title="A2A GenUI Agent (Demo)", version="0.1.0")
+app = FastAPI(title="A2A GenUI Agent (Demo)", version="0.1.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -62,7 +61,7 @@ async def agent_card():
         "url": "http://localhost:8030/",
         "capabilities": ["compose_ui"],
         "protocol": "a2a-jsonrpc",
-        "version": "0.1.0",
+        "version": "0.1.1",
     }
 
 
@@ -98,28 +97,30 @@ def _fallback_blocks(query: str, citations: List[Json]) -> List[Json]:
 
 
 def _system_instruction() -> str:
+    # Extra streng: “ONLY JSON” + geen markdown
     return (
-        "Je maakt UI-blokken voor een agent-gedreven interface (A2UI). "
-        "Je output is STRICT JSON, zonder markdown, zonder extra tekst.\n\n"
+        "Je maakt UI-blokken voor een agent-gedreven interface (A2UI).\n"
+        "Je output is STRICT JSON: return EXACTLY ONE JSON object and NOTHING ELSE.\n"
+        "GEEN markdown, GEEN uitleg, GEEN code fences.\n\n"
         "Je mag uitsluitend deze kinds gebruiken: callout, citations, accordion, next_questions, notice.\n"
-        "JSON schema (vereist):\n"
+        "Schema (vereist):\n"
         "{\n"
         '  "blocks": [\n'
-        '    {"kind":"callout", "title":str, "body":str},\n'
-        '    {"kind":"citations", "title":str, "items":[{"title":str,"url":str,"snippet":str}]},\n'
-        '    {"kind":"accordion", "title":str, "items":[{"q":str,"a":str}]},\n'
-        '    {"kind":"next_questions", "title":str, "items":[str,...]},\n'
-        '    {"kind":"notice", "title":str, "body":str}\n'
+        '    {"kind":"callout","title":str,"body":str},\n'
+        '    {"kind":"citations","title":str,"items":[{"title":str,"url":str,"snippet":str}]},\n'
+        '    {"kind":"accordion","title":str,"items":[{"q":str,"a":str}]},\n'
+        '    {"kind":"next_questions","title":str,"items":[str,...]},\n'
+        '    {"kind":"notice","title":str,"body":str}\n'
         "  ]\n"
         "}\n\n"
         "Regels:\n"
-        "- Schrijf in het Nederlands, B1/B2.\n"
+        "- Schrijf in het Nederlands (B1/B2).\n"
         "- Geen persoonsgegevens.\n"
         "- Gebruik exact de meegegeven citations in het citations-blok (niet verzinnen, niet aanpassen).\n"
         "- Minimaal 4 blokken.\n"
-        "- Callout moet een korte kern geven (max 6 regels).\n"
-        "- Accordion: 2-4 Q/A items.\n"
-        "- Next_questions: 3-5 korte vervolgvragen."
+        "- Callout max 6 regels.\n"
+        "- Accordion 2-4 Q/A.\n"
+        "- Next_questions 3-5 items."
     )
 
 
@@ -127,19 +128,27 @@ def _extract_json(text: str) -> Optional[Json]:
     if not text:
         return None
     s = text.strip()
+
+    # Strip code fences if model ignores instruction
     s = re.sub(r"^```(?:json)?\s*", "", s)
     s = re.sub(r"\s*```$", "", s)
 
+    # First try: whole string
     try:
         return json.loads(s)
     except Exception:
-        m = re.search(r"\{[\s\S]*\}", s)
-        if not m:
-            return None
+        pass
+
+    # Second try: largest JSON object region
+    start = s.find("{")
+    end = s.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = s[start : end + 1]
         try:
-            return json.loads(m.group(0))
+            return json.loads(candidate)
         except Exception:
             return None
+    return None
 
 
 def _validate_blocks(obj: Json, citations: List[Json]) -> Optional[List[Json]]:
@@ -191,20 +200,16 @@ def _validate_blocks(obj: Json, citations: List[Json]) -> Optional[List[Json]]:
     return out
 
 
-async def _gemini_compose(query: str, citations: List[Json]) -> Tuple[Optional[List[Json]], str]:
+async def _gemini_call(prompt_text: str) -> Tuple[Optional[str], str]:
     if not GEMINI_API_KEY:
         return None, "no_api_key"
 
     url = f"{GEMINI_BASE_URL}/{GEMINI_API_VERSION}/models/{GEMINI_MODEL}:generateContent"
     headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
 
-    user_payload = {"query": query, "citations": citations}
-
     body = {
         "systemInstruction": {"parts": [{"text": _system_instruction()}]},
-        "contents": [
-            {"role": "user", "parts": [{"text": "Maak UI-blokken voor deze vraag en bronnen. Input JSON:\n" + json.dumps(user_payload, ensure_ascii=False)}]}
-        ],
+        "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
         "generationConfig": {"temperature": TEMPERATURE, "maxOutputTokens": GEMINI_MAX_TOKENS, "candidateCount": 1},
     }
 
@@ -219,23 +224,45 @@ async def _gemini_compose(query: str, citations: List[Json]) -> Tuple[Optional[L
             parts = ((cand0.get("content") or {}).get("parts") or [])
             text = ""
             if isinstance(parts, list):
-                text = "\n".join([p.get("text", "") for p in parts if isinstance(p, dict) and isinstance(p.get("text"), str)]).strip()
-
-            obj = _extract_json(text)
-            if not isinstance(obj, dict):
-                return None, "bad_json"
-
-            blocks = _validate_blocks(obj, citations)
-            if not blocks:
-                return None, "invalid_blocks"
-
-            return blocks, "ok"
+                text = "\n".join(
+                    [p.get("text", "") for p in parts if isinstance(p, dict) and isinstance(p.get("text"), str)]
+                ).strip()
+            return text, "ok"
     except httpx.ConnectError:
         return None, "connect_error"
     except httpx.ReadTimeout:
         return None, "timeout"
     except Exception:
         return None, "exception"
+
+
+async def _gemini_compose(query: str, citations: List[Json]) -> Tuple[Optional[List[Json]], str]:
+    if not GEMINI_API_KEY:
+        return None, "no_api_key"
+
+    payload = {"query": query, "citations": citations}
+    base_prompt = "Maak UI-blokken voor deze vraag en bronnen. Input JSON:\n" + json.dumps(payload, ensure_ascii=False)
+
+    # Try 1
+    text1, r1 = await _gemini_call(base_prompt)
+    if text1 and r1 == "ok":
+        obj = _extract_json(text1)
+        if isinstance(obj, dict):
+            blocks = _validate_blocks(obj, citations)
+            if blocks:
+                return blocks, "ok"
+        # Try 2 (harder)
+        harder = base_prompt + "\n\nRETURN ONLY JSON. NO PROSE. NO MARKDOWN. START WITH '{' AND END WITH '}'."
+        text2, r2 = await _gemini_call(harder)
+        if text2 and r2 == "ok":
+            obj2 = _extract_json(text2)
+            if isinstance(obj2, dict):
+                blocks2 = _validate_blocks(obj2, citations)
+                if blocks2:
+                    return blocks2, "ok"
+        return None, "bad_json"
+
+    return None, r1
 
 
 @app.post("/")
