@@ -33,7 +33,10 @@ from .tools import (
     rules_lookup,
 )
 
-app = FastAPI(title="MCP Tools (Demo)", version="0.1.0")
+# ✅ NEW (Idea 1 step 1.2): curated deterministic search tool
+from .bd_search import bd_search
+
+app = FastAPI(title="MCP Tools (Demo)", version="0.1.1")
 
 # CORS: keep it permissive for local demo
 app.add_middleware(
@@ -55,7 +58,6 @@ _clients: List[asyncio.Queue] = []
 
 async def _publish_sse(payload: Dict[str, Any]) -> None:
     """Broadcast a JSON-serializable payload to all SSE clients."""
-    # Copy list to avoid mutation issues during iteration
     for q in list(_clients):
         try:
             q.put_nowait(payload)
@@ -67,6 +69,15 @@ async def _publish_sse(payload: Dict[str, Any]) -> None:
 async def _call_tool(tool_name: str, arguments: Dict[str, Any]) -> Any:
     """
     Deterministic tool dispatcher with fake latency 300–700ms.
+
+    Supported tools:
+    - rules_lookup
+    - doc_checklist
+    - risk_notes
+    - extract_entities
+    - classify_case
+    - policy_snippets
+    - bd_search   ✅ (Idea 1 step 1.2)
     """
     # Fake latency (non-deterministic timing is fine; results remain deterministic)
     await asyncio.sleep(random.uniform(0.3, 0.7))
@@ -85,6 +96,16 @@ async def _call_tool(tool_name: str, arguments: Dict[str, Any]) -> Any:
     if tool_name == "policy_snippets":
         return policy_snippets(arguments.get("type"))
 
+    # ✅ NEW
+    if tool_name == "bd_search":
+        query = arguments.get("query", "")
+        k = arguments.get("k", 5)
+        try:
+            k = int(k)
+        except Exception:
+            k = 5
+        return bd_search(str(query), k=k)
+
     raise ValueError(f"Unknown tool: {tool_name}")
 
 
@@ -102,7 +123,6 @@ async def sse():
 
     async def gen():
         try:
-            # Small initial comment helps some proxies/browsers
             yield ": connected\n\n"
             while True:
                 payload = await q.get()

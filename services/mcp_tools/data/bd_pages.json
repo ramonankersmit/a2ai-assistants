@@ -1,0 +1,118 @@
+{
+  "pages": [
+    {
+      "title": "Bezwaar maken: eisen en termijn",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/eisen-bezwaar",
+      "snippet": "U moet meestal binnen 6 weken bezwaar maken. In uw bezwaar staan o.a. datum, aanslagnummer/kenmerk en motivatie.",
+      "keywords": [
+        "bezwaar",
+        "bezwaarschrift",
+        "termijn",
+        "6 weken",
+        "aanslag",
+        "kenmerk"
+      ]
+    },
+    {
+      "title": "Bezwaarcheck inkomstenbelasting",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/hulpmiddel-bezwaarcheck-inkomstenbelasting",
+      "snippet": "Hulpmiddel om te bepalen of bezwaar zinvol is en waar u het formulier of online route vindt (situatie-afhankelijk).",
+      "keywords": [
+        "bezwaarcheck",
+        "inkomstenbelasting",
+        "hulpmiddel",
+        "formulier"
+      ]
+    },
+    {
+      "title": "Bezwaar en uitstel van betaling",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/bezwaar-en-uitstel-van-betaling",
+      "snippet": "Voor het betwiste deel kunt u vaak uitstel van betaling krijgen totdat er een uitspraak is op uw bezwaar (voorwaarden gelden).",
+      "keywords": [
+        "uitstel",
+        "betaling",
+        "bezwaar",
+        "betwiste deel"
+      ]
+    },
+    {
+      "title": "Ik kan mijn belasting niet op tijd betalen",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/betalenenontvangen/content/ik-kan-mijn-belasting-niet-op-tijd-betalen-uitstel-betalingsregeling",
+      "snippet": "U kunt uitstel of een betalingsregeling aanvragen. Soms online, soms via formulier. Houd gegevens over inkomen/uitgaven bij de hand.",
+      "keywords": [
+        "betalingsregeling",
+        "uitstel",
+        "niet op tijd betalen",
+        "betalenenontvangen"
+      ]
+    },
+    {
+      "title": "Verzoek betalingsregeling voor particulieren (formulier)",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/themaoverstijgend/programmas_en_formulieren/verzoek-betalingsregeling-voor-particulieren",
+      "snippet": "Formulier voor een betalingsregeling als u niet op tijd kunt betalen. U geeft o.a. bedrag, termijnen en financiële gegevens op.",
+      "keywords": [
+        "formulier",
+        "betalingsregeling",
+        "particulieren",
+        "termijnen"
+      ]
+    },
+    {
+      "title": "Huurtoeslag: kan ik huurtoeslag krijgen?",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/huurtoeslag/content/kan-ik-huurtoeslag-krijgen",
+      "snippet": "Overzicht van voorwaarden en welke gegevens u nodig hebt (inkomen/vermogen/huur/huishouden).",
+      "keywords": [
+        "huurtoeslag",
+        "voorwaarden",
+        "inkomen",
+        "vermogen",
+        "huur"
+      ]
+    },
+    {
+      "title": "Huurtoeslag: voorwaarden",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/toeslagen/huurtoeslag/voorwaarden/voorwaarden",
+      "snippet": "Belangrijkste voorwaarden: leeftijd, inkomen/vermogen, woningtype en huurbetaling aantonen. Controleer het jaar en uw situatie.",
+      "keywords": [
+        "huurtoeslag",
+        "voorwaarden",
+        "woning",
+        "leeftijd",
+        "huurbetaling"
+      ]
+    },
+    {
+      "title": "Bezwaar, beroep en klacht (overzicht)",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/bezwaar-en-beroep",
+      "snippet": "Overzicht: bezwaar maken, wanneer u iets hoort, mondeling toelichten, beroep en klacht.",
+      "keywords": [
+        "bezwaar",
+        "beroep",
+        "klacht",
+        "overzicht"
+      ]
+    },
+    {
+      "title": "Betalen en ontvangen (overzicht)",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/betalenenontvangen/content/betalenenontvangen",
+      "snippet": "Algemene informatie over betalen, uitstel, betalingsregelingen en ontvangen van bedragen.",
+      "keywords": [
+        "betalen",
+        "ontvangen",
+        "uitstel",
+        "betalingsregeling"
+      ]
+    },
+    {
+      "title": "Toeslagen (overzicht)",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/toeslagen/toeslagen",
+      "snippet": "Startpunt voor toeslagen: aanvragen, wijzigen, stopzetten en voorwaarden per toeslagsoort.",
+      "keywords": [
+        "toeslagen",
+        "aanvragen",
+        "wijzigen",
+        "voorwaarden"
+      ]
+    }
+  ]
+}
