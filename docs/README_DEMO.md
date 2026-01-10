@@ -1,10 +1,13 @@
-# Belastingdienst Assistants (MVP)
+# Belastingdienst Assistants (MVP) — README_DEMO
 
 Standalone demo-repo met:
-- Web shell (Vite + Lit) met A2UI surfaces + dataModelUpdate
-- Orchestrator (FastAPI) met progressive updates (0.6s)
-- MCP toolserver (FastAPI) met **SSE transport**
+- Web shell (Vite + Lit) met A2UI surfaces + `dataModelUpdate`
+- Orchestrator (FastAPI) met progressive updates (0.6s) en status-prefixes: **A2UI / MCP / A2A**
+- MCP toolserver (FastAPI) met **SSE transport** (`/sse` + `POST /message`)
 - 2x A2A agent servers (FastAPI) met agent-card + JSON-RPC (`message/send`)
+- Bezwaar-agent: **Gemini optioneel** (zichtbaar via `[Bron: Gemini]` / `[Bron: Fallback]`)
+
+---
 
 ## 1) Prereqs (Windows)
 
@@ -12,102 +15,160 @@ Standalone demo-repo met:
 - Node.js 18+ (npm)
 - Git Bash of CMD/PowerShell
 
+---
+
 ## 2) Install (1x)
 
-Open een terminal in repo-root:
+Open een terminal in repo-root.
 
+### 2.1 Config (.env)
+**Git Bash**
+```bash
+cp .env.example .env
+```
+
+**CMD/PowerShell**
 ```bat
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
 copy .env.example .env
 ```
 
 Optioneel: vul `GEMINI_API_KEY` in `.env`. Zonder key wordt deterministic fallback gebruikt.
 
-## 3) Starten (4 processen)
+### 2.2 Python venv + deps
+**Git Bash**
+```bash
+python -m venv .venv
+source .venv/Scripts/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-### Optie A — met scripts (aanrader)
-Open repo-root en run:
+**CMD/PowerShell**
+```bat
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
 
+### 2.3 Web deps
+```bash
+cd apps/web-shell
+npm install
+cd ../..
+```
+
+---
+
+## 3) Starten (alle processen)
+
+### Optie A — scripts (aanrader)
+
+**Git Bash (aanrader als je Git Bash gebruikt)**
+```bash
+bash scripts/run_all.sh
+```
+
+**CMD/PowerShell**
 ```bat
 scripts\run_all.cmd
 ```
 
-Dit opent 4 terminals:
+Poorten:
 - MCP tools: `http://127.0.0.1:8000`
-- A2A toeslagen: `http://localhost:8010`
-- A2A bezwaar: `http://localhost:8020`
-- Orchestrator: `http://localhost:10002`
+- A2A toeslagen: `http://127.0.0.1:8010`
+- A2A bezwaar: `http://127.0.0.1:8020`
+- Orchestrator: `http://127.0.0.1:10002`
 - Web: `http://127.0.0.1:5173`
 
 ### Optie B — handmatig (per terminal)
 
+Let op: start deze commando’s **vanaf repo-root** (belangrijk i.v.m. package-imports).
+
 **Terminal 1 (MCP)**
 ```bat
 .venv\Scripts\activate
-cd services\mcp_tools
-python -m uvicorn server:app --host 127.0.0.1 --port 8000
+python -m uvicorn services.mcp_tools.server:app --host 127.0.0.1 --port 8000
 ```
 
 **Terminal 2 (A2A toeslagen)**
 ```bat
 .venv\Scripts\activate
-cd services\a2a_toeslagen_agent
-python -m uvicorn server:app --host 127.0.0.1 --port 8010
+python -m uvicorn services.a2a_toeslagen_agent.server:app --host 127.0.0.1 --port 8010
 ```
 
 **Terminal 3 (A2A bezwaar)**
 ```bat
 .venv\Scripts\activate
-cd services\a2a_bezwaar_agent
-python -m uvicorn server:app --host 127.0.0.1 --port 8020
+python -m uvicorn services.a2a_bezwaar_agent.server:app --host 127.0.0.1 --port 8020
 ```
 
 **Terminal 4 (Orchestrator)**
 ```bat
 .venv\Scripts\activate
-cd apps\orchestrator
-python -m uvicorn main:app --host 127.0.0.1 --port 10002
+python -m uvicorn apps.orchestrator.main:app --host 127.0.0.1 --port 10002
 ```
 
 **Terminal 5 (Web)**
 ```bat
 cd apps\web-shell
-npm install
-npm run dev -- --port 5173
+npm run dev
 ```
+
+---
 
 ## 4) Demo runbook (clicks)
 
 1. Open `http://127.0.0.1:5173`
-2. Startscherm toont 2 tegels (Toeslagen Check / Bezwaar Assistent)
+2. Startscherm toont tegels (Toeslagen Check / Bezwaar Assistent)
+3. Elke run reset de surface (A2UI `surface/open`) zodat herhaalde runs weer duidelijk zichtbaar zijn.
+
+### UI gedrag (wat je laat zien)
+- Statusregels in de log beginnen met:
+  - `A2UI:` (UI/flow-stappen)
+  - `MCP:` (tool-call + latency, bv. `MCP: rules_lookup (412ms)`)
+  - `A2A:` (agent-call + latency)
+- Statuspaneel is inklapbaar.
+- “Progressive updates” zijn expres niet gebatcht: na elke update ~0.6s delay.
 
 ### Demo Flow 1 — Toeslagen Check
 1. Klik **Start** op *Toeslagen Check*
 2. Kies inputs en klik **Check**
 3. Je ziet minimaal 4 progressive updates (status verandert + inhoud groeit):
-   - Voorwaarden ophalen (MCP)
-   - Checklist samenstellen (MCP) → eerste items zichtbaar
-   - Aandachtspunten berekenen (MCP) → extra inhoud
-   - Uitleg in B1 (A2A) → verrijkte items met priority + B1 uitleg
+   - `A2UI: Voorwaarden ophalen…`
+   - `MCP: rules_lookup (Nms)` + voorwaarden/resultaten
+   - `A2UI: Checklist samenstellen…`
+   - `MCP: doc_checklist (Nms)` + eerste documenten
+   - `A2UI: Aandachtspunten berekenen…`
+   - `MCP: risk_notes (Nms)` + aandachtspunten
+   - `A2UI: Uitleg in B1 (agent)…`
+   - `A2A: explain_toeslagen (Nms)` + verrijking (prioriteit-icoontjes)
 
 ### Demo Flow 2 — Bezwaar Assistent
 1. Klik **Start** op *Bezwaar Assistent*
 2. Plak (of laat staan) demo-tekst en klik **Analyseer**
 3. Je ziet minimaal 4 progressive updates:
-   - Entiteiten extraheren (MCP) → zaakveldjes vullen
-   - Zaak classificeren (MCP) → type/reden
-   - Juridische structuur (A2A) → key points + acties
-   - Concept reactie (Gemini of fallback) → conceptreactie
+   - `A2UI: Entiteiten extraheren…`
+   - `MCP: extract_entities (Nms)` → zaakveldjes vullen
+   - `A2UI: Zaak classificeren…`
+   - `MCP: classify_case (Nms)` en `MCP: policy_snippets (Nms)` → type/reden/snippets
+   - `A2UI: Juridische structuur (agent)…`
+   - `A2A: structure_bezwaar (Nms)` → key points + acties + concept
+4. In “Concept Reactie” zie je expliciet:
+   - `[Bron: Gemini]` of `[Bron: Fallback]`
+
+---
 
 ## 5) Troubleshooting (Windows)
 
-- **CORS errors**: gebruik exact de poorten uit README. Orchestrator, MCP en agents hebben CORS open voor `localhost` en `127.0.0.1`.
+- **CORS errors**: gebruik exact de poorten uit dit document.
 - **Web laadt niet**: check of `npm install` in `apps/web-shell` is uitgevoerd.
-- **Orchestrator kan tools niet callen**: check of MCP op `http://127.0.0.1:8000/sse` draait (zie `.env`).
+- **Orchestrator kan tools niet callen**: check of MCP draait en `MCP_SSE_URL` in `.env` wijst naar `http://127.0.0.1:8000/sse`.
+- **MCP /message 405 in browser**: dat is normaal; `/message` accepteert alleen **POST**.
 - **A2A call faalt**: check of agents draaien op `8010` en `8020`.
-- **Gemini faalt**: demo valt automatisch terug op deterministic conceptreactie.
+- **Gemini faalt**: demo valt automatisch terug op fallback (zichtbaar in de UI).
+
+---
 
 ## 6) Belangrijke demo-notes
 
