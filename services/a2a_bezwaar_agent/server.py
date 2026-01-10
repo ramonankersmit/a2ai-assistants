@@ -37,6 +37,7 @@ async def agent_card():
         "url": "http://localhost:8020/",
         "capabilities": ["structure_bezwaar"],
         "protocol": "a2a-jsonrpc",
+        "version": "0.1.1",
     }
 
 
@@ -134,14 +135,20 @@ async def jsonrpc(payload: Json = Body(...)):
         "Leg vast welke gegevens zijn gebruikt bij de beoordeling (demo).",
     ]
 
+    draft_source = "fallback"
     draft = await _gemini_draft(raw_text, overview)
-    if not draft:
+    if draft:
+        draft_source = "gemini"
+        draft = f"[Bron: Gemini]\n{draft}"
+    else:
         draft = _deterministic_draft(overview)
+        draft = f"[Bron: Fallback]\n{draft}"
 
     result = {
         "overview": overview,
         "key_points": key_points,
         "actions": actions,
+        "draft_source": draft_source,
         "draft_response": draft,
     }
     return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
