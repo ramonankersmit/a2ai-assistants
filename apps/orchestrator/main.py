@@ -99,20 +99,7 @@ async def _set_results(sid: str, surface_id: str, results: List[Json]) -> None:
     await hub.push_update_and_apply(sid, surface_id, [{"op": "replace", "path": "/results", "value": results}])
 
 
-async def _append_results(sid: str, surface_id: str, extra: List[Json]) -> None:
-    s = await hub.get(sid)
-    if not s:
-        return
-    model = s.get_model(surface_id)
-    current = model.get("results") or []
-    if not isinstance(current, list):
-        current = []
-    new = current + extra
-    await _set_results(sid, surface_id, new)
-
-
 async def _sleep_tick() -> None:
-    # Required: show progressive updates (do not batch)
     await asyncio.sleep(0.6)
 
 
@@ -128,10 +115,6 @@ async def _mcp_call_with_trace(
     *,
     step: Optional[str] = None,
 ) -> Json:
-    """
-    Call an MCP tool and emit a status update including measured latency.
-    Message prefix is "MCP:" so the UI history lines are consistent.
-    """
     t0 = time.perf_counter()
     try:
         result = await mcp.call_tool(tool_name, args)
@@ -153,10 +136,6 @@ async def _a2a_call_with_trace(
     *,
     step: Optional[str] = None,
 ) -> Json:
-    """
-    Call an A2A agent and emit a status update including measured latency.
-    Message prefix is "A2A:" so the UI history lines are consistent.
-    """
     t0 = time.perf_counter()
     try:
         result = await client.message_send(capability, payload)
@@ -176,14 +155,11 @@ async def health():
 
 @app.get("/events")
 async def events(request: Request):
-    """A2UI stream (SSE) used by the web shell."""
     session = await hub.create()
 
     async def gen():
-        # session id first
         yield f"data: {JSONResponse(content={'kind':'session/created','sessionId':session.session_id}).body.decode('utf-8')}\n\n"
 
-        # open home surface
         await _send_open_surface(session.session_id, "home", "Belastingdienst Assistants", _home_surface_model())
         while True:
             if await request.is_disconnected():
@@ -213,17 +189,18 @@ async def client_event(payload: Json = Body(...)):
         target = data.get("surfaceId")
         if target == "toeslagen":
             await _send_open_surface(
-                sid,
-                "toeslagen",
-                "Toeslagen Check",
+                sid, "toeslagen", "Toeslagen Check",
                 _empty_surface_model("A2UI: Vul de gegevens in en klik op Check."),
             )
         elif target == "bezwaar":
             await _send_open_surface(
-                sid,
-                "bezwaar",
-                "Bezwaar Assistent",
+                sid, "bezwaar", "Bezwaar Assistent",
                 _empty_surface_model("A2UI: Plak een bezwaarbrief en klik op Analyseer."),
+            )
+        elif target == "genui_search":
+            await _send_open_surface(
+                sid, "genui_search", "Generatieve UI — Zoeken",
+                _empty_surface_model("A2UI: Stel een vraag en klik op Zoek."),
             )
         else:
             await _send_open_surface(sid, "home", "Belastingdienst Assistants", _home_surface_model())
@@ -237,17 +214,19 @@ async def client_event(payload: Json = Body(...)):
         asyncio.create_task(run_bezwaar_flow(sid, data))
         return {"ok": True}
 
+    # Idee 1 - stub flow (nog zonder MCP/A2A)
+    if name == "genui/search":
+        asyncio.create_task(run_genui_search_flow(sid, data))
+        return {"ok": True}
+
     return {"ok": True, "ignored": True}
 
 
 async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     surface_id = "toeslagen"
 
-    # NEW: reset UI model for a fresh run (clears /results and resets UI history via surface_open)
     await _send_open_surface(
-        sid,
-        "toeslagen",
-        "Toeslagen Check",
+        sid, "toeslagen", "Toeslagen Check",
         _empty_surface_model("A2UI: Nieuwe run gestart. Bezig met verwerken…"),
     )
     await _sleep_tick()
@@ -263,10 +242,7 @@ async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     voorwaarden = await _mcp_call_with_trace(
         sid, surface_id, "rules_lookup", {"regeling": regeling, "jaar": jaar}, step="rules_lookup"
     )
-    await _append_results(
-        sid, surface_id,
-        [{"kind": "voorwaarden", "title": "Voorwaarden", "items": voorwaarden.get("voorwaarden", [])}]
-    )
+    await _set_results(sid, surface_id, [{"kind": "voorwaarden", "title": "Voorwaarden", "items": voorwaarden.get("voorwaarden", [])}])
 
     await _set_status(sid, surface_id, loading=True, message="A2UI: Checklist samenstellen…", step="doc_checklist")
     await _sleep_tick()
@@ -275,40 +251,42 @@ async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
         sid, surface_id, "doc_checklist", {"regeling": regeling, "situatie": situatie}, step="doc_checklist"
     )
     docs = checklist.get("documenten", [])
-    await _append_results(sid, surface_id, [{"kind": "documenten", "title": "Benodigde Documenten", "items": docs[:3]}])
+    await _set_results(sid, surface_id, [
+        {"kind": "voorwaarden", "title": "Voorwaarden", "items": voorwaarden.get("voorwaarden", [])},
+        {"kind": "documenten", "title": "Benodigde Documenten", "items": docs[:3]},
+    ])
 
     await _set_status(sid, surface_id, loading=True, message="A2UI: Aandachtspunten berekenen…", step="risk_notes")
     await _sleep_tick()
 
     notes = await _mcp_call_with_trace(
-        sid,
-        surface_id,
-        "risk_notes",
+        sid, surface_id, "risk_notes",
         {"regeling": regeling, "jaar": jaar, "situatie": situatie, "loonOfVermogen": loon_of_vermogen},
         step="risk_notes",
     )
     risks = notes.get("aandachtspunten", [])
-    await _append_results(sid, surface_id, [{"kind": "aandachtspunten", "title": "Aandachtspunten", "items": risks}])
+
+    await _set_results(sid, surface_id, [
+        {"kind": "voorwaarden", "title": "Voorwaarden", "items": voorwaarden.get("voorwaarden", [])},
+        {"kind": "documenten", "title": "Benodigde Documenten", "items": docs},
+        {"kind": "aandachtspunten", "title": "Aandachtspunten", "items": risks},
+    ])
 
     await _set_status(sid, surface_id, loading=True, message="A2UI: Uitleg in B1 (agent)…", step="a2a_explain")
     await _sleep_tick()
 
-    combined_items: List[Json] = []
-    for item in docs:
-        combined_items.append({"category": "document", "text": item})
-    for item in risks:
-        combined_items.append({"category": "aandachtspunt", "text": item})
-
+    combined_items: List[Json] = [{"category": "document", "text": d} for d in docs] + [{"category": "aandachtspunt", "text": r} for r in risks]
     enriched = await _a2a_call_with_trace(
-        sid,
-        surface_id,
-        a2a_toes,
-        "explain_toeslagen",
+        sid, surface_id, a2a_toes, "explain_toeslagen",
         {"inputs": {"regeling": regeling, "jaar": jaar, "situatie": situatie}, "items": combined_items},
         step="a2a_explain",
     )
 
-    await _append_results(sid, surface_id, [{"kind": "verrijking", "title": "Verrijkte uitleg (B1)", "items": enriched.get("items", [])}])
+    await _set_results(sid, surface_id, [
+        {"kind": "documenten", "title": "Benodigde Documenten", "items": docs},
+        {"kind": "aandachtspunten", "title": "Aandachtspunten", "items": risks},
+        {"kind": "verrijking", "title": "Verrijkte uitleg (B1)", "items": enriched.get("items", [])},
+    ])
 
     await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. Demo-uitkomst (geen besluit).", step="done")
 
@@ -319,11 +297,8 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
     if not text:
         text = "Ik ben het niet eens met de naheffing van €750. Mijn inkomen is te laag voor deze aanslag. Ik vraag om herziening."
 
-    # NEW: reset UI model for a fresh run (clears /results and resets UI history via surface_open)
     await _send_open_surface(
-        sid,
-        "bezwaar",
-        "Bezwaar Assistent",
+        sid, "bezwaar", "Bezwaar Assistent",
         _empty_surface_model("A2UI: Nieuwe analyse gestart. Bezig met verwerken…"),
     )
     await _sleep_tick()
@@ -333,73 +308,151 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
 
     entities = await _mcp_call_with_trace(sid, surface_id, "extract_entities", {"text": text}, step="extract_entities")
 
-    await _set_results(
-        sid,
-        surface_id,
-        [
-            {
-                "kind": "bezwaar",
-                "overview": {
-                    "datum": entities.get("datum"),
-                    "onderwerp": entities.get("onderwerp"),
-                    "bedrag": entities.get("bedrag"),
-                },
-                "key_points": [],
-                "actions": [],
-                "draft_response": "",
-            }
-        ],
-    )
+    await _set_results(sid, surface_id, [{
+        "kind": "bezwaar",
+        "overview": {"datum": entities.get("datum"), "onderwerp": entities.get("onderwerp"), "bedrag": entities.get("bedrag")},
+        "key_points": [],
+        "actions": [],
+        "draft_response": "",
+    }])
 
     await _set_status(sid, surface_id, loading=True, message="A2UI: Zaak classificeren…", step="classify_case")
     await _sleep_tick()
 
     classification = await _mcp_call_with_trace(sid, surface_id, "classify_case", {"text": text}, step="classify_case")
-    snippets = await _mcp_call_with_trace(
-        sid, surface_id, "policy_snippets", {"type": classification.get("type")}, step="policy_snippets"
-    )
-
-    s = await hub.get(sid)
-    model = s.get_model(surface_id) if s else {}
-    results = model.get("results") or []
-    if results and isinstance(results, list) and isinstance(results[0], dict):
-        results[0]["overview"]["type"] = classification.get("type")
-        results[0]["overview"]["reden"] = classification.get("reden") if "reden" in classification else classification.get("reason")
-        results[0]["overview"]["snippets"] = snippets.get("snippets", [])
-        await _set_results(sid, surface_id, results)
-
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Juridische structuur (agent)…", step="a2a_structure")
-    await _sleep_tick()
+    snippets = await _mcp_call_with_trace(sid, surface_id, "policy_snippets", {"type": classification.get("type")}, step="policy_snippets")
 
     structured = await _a2a_call_with_trace(
-        sid,
-        surface_id,
-        a2a_bez,
-        "structure_bezwaar",
-        {
-            "raw_text": text,
-            "entities": entities,
-            "classification": classification,
-            "snippets": snippets.get("snippets", []),
-        },
+        sid, surface_id, a2a_bez, "structure_bezwaar",
+        {"raw_text": text, "entities": entities, "classification": classification, "snippets": snippets.get("snippets", [])},
         step="a2a_structure",
     )
 
-    await _set_results(
-        sid,
-        surface_id,
-        [
-            {
-                "kind": "bezwaar",
-                "overview": structured.get("overview", {}),
-                "key_points": structured.get("key_points", []),
-                "actions": structured.get("actions", []),
-                "draft_response": structured.get("draft_response", ""),
-            }
-        ],
-    )
-
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Concept reactie afronden…", step="draft")
-    await _sleep_tick()
+    await _set_results(sid, surface_id, [{
+        "kind": "bezwaar",
+        "overview": structured.get("overview", {}),
+        "key_points": structured.get("key_points", []),
+        "actions": structured.get("actions", []),
+        "draft_source": structured.get("draft_source"),
+        "draft_response": structured.get("draft_response", ""),
+    }])
 
     await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. Conceptreactie opgesteld (demo).", step="done")
+
+
+def _stub_search(query: str) -> List[Json]:
+    q = (query or "").lower()
+    items: List[Json] = []
+
+    def add(title: str, url: str, snippet: str):
+        items.append({"title": title, "url": url, "snippet": snippet})
+
+    # Sources (curated)
+    if any(k in q for k in ["bezwaar", "aanslag", "beroep"]):
+        add("Hoe maak ik bezwaar?", "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/eisen-bezwaar",
+            "Binnen 6 weken bezwaar maken; online/formulier/brief, afhankelijk van situatie.")
+        add("Bezwaarcheck inkomstenbelasting", "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/hulpmiddel-bezwaarcheck-inkomstenbelasting",
+            "Hulpmiddel om te bepalen of u bezwaar moet indienen en waar u het formulier vindt.")
+        add("Bezwaar en uitstel van betaling", "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/bezwaar-en-uitstel-van-betaling",
+            "Voor het betwiste deel krijgt u uitstel van betaling tot uitspraak op bezwaar.")
+
+    if any(k in q for k in ["betalingsregeling", "uitstel", "betalen", "niet op tijd"]):
+        add("Ik kan mijn belasting niet op tijd betalen", "https://www.belastingdienst.nl/wps/wcm/connect/nl/betalenenontvangen/content/ik-kan-mijn-belasting-niet-op-tijd-betalen-uitstel-betalingsregeling",
+            "U kunt uitstel of een betalingsregeling aanvragen; soms online, soms via formulier.")
+        add("Verzoek betalingsregeling voor particulieren", "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/themaoverstijgend/programmas_en_formulieren/verzoek-betalingsregeling-voor-particulieren",
+            "Formulier om een betalingsregeling aan te vragen als u niet op tijd kunt betalen.")
+
+    if any(k in q for k in ["huurtoeslag", "toeslag", "huur"]):
+        add("Voorwaarden huurtoeslag", "https://www.belastingdienst.nl/wps/wcm/connect/bldcontentnl/belastingdienst/prive/toeslagen/huurtoeslag/voorwaarden/voorwaarden",
+            "Belangrijkste voorwaarden: leeftijd, inkomen/vermogen, woningtype en huurbetaling aantonen.")
+        add("Kan ik huurtoeslag krijgen?", "https://www.belastingdienst.nl/wps/wcm/connect/nl/huurtoeslag/content/kan-ik-huurtoeslag-krijgen",
+            "Overzicht voorwaarden en proefberekening (inkomen/vermogen/huur/huishouden).")
+
+    if not items:
+        # Default helpful sources
+        add("Bezwaar, beroep en klacht", "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/bezwaar-en-beroep",
+            "Overzicht bezwaar maken, wanneer u iets hoort, mondeling toelichten, beroep, etc.")
+        add("Huurtoeslag", "https://www.belastingdienst.nl/wps/wcm/connect/nl/huurtoeslag/huurtoeslag",
+            "Startpunt huurtoeslag: voorwaarden, aanvragen, proefberekening.")
+        add("Betalen en ontvangen", "https://www.belastingdienst.nl/wps/wcm/connect/nl/betalenenontvangen/content/betalenenontvangen",
+            "Algemene informatie over betalen, uitstel en betalingsregelingen.")
+
+    return items[:5]
+
+
+async def run_genui_search_flow(sid: str, inputs: Json) -> None:
+    """
+    Idee 1 (Stap 1.1): deterministische stub-search + UI-blokken.
+    In volgende stappen vervangen we stub-search door MCP bd_search en UI-compositie door A2A compose_ui.
+    """
+    surface_id = "genui_search"
+    query = str(inputs.get("query", "")).strip()
+    if not query:
+        return
+
+    await _send_open_surface(
+        sid, surface_id, "Generatieve UI — Zoeken",
+        _empty_surface_model("A2UI: Nieuwe zoekrun gestart…"),
+    )
+    await _sleep_tick()
+
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Zoekopdracht ontvangen…", step="start")
+    await _set_results(sid, surface_id, [])
+    await _sleep_tick()
+
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Bronnen selecteren (stub)…", step="select_sources")
+    await _sleep_tick()
+
+    citations = _stub_search(query)
+    await _set_results(sid, surface_id, [{
+        "kind": "citations",
+        "title": "Bronnen (demo-stub)",
+        "items": citations
+    }])
+    await _sleep_tick()
+
+    await _set_status(sid, surface_id, loading=True, message="A2UI: UI-blokken samenstellen…", step="compose_blocks")
+    await _sleep_tick()
+
+    blocks: List[Json] = [
+        {
+            "kind": "callout",
+            "title": "Kern (demo)",
+            "body": (
+                f"Vraag: {query}\n\n"
+                "Deze tegel demonstreert het A2UI-concept: de backend stuurt UI als data (blokken), "
+                "en de web-shell rendert die veilig met vaste componenten."
+            ),
+        },
+        {
+            "kind": "citations",
+            "title": "Bronnen",
+            "items": citations,
+        },
+        {
+            "kind": "accordion",
+            "title": "Veelgestelde vragen (demo)",
+            "items": [
+                {"q": "Wat is dit precies?", "a": "Een on-the-fly UI die wordt opgebouwd uit blokken (A2UI). In stap 1.2 komt echte zoeklogica via MCP."},
+                {"q": "Waarom blokken i.p.v. vrije HTML?", "a": "Veiligheid en consistentie: de UI blijft Belastingdienst-stijl, terwijl de agent alleen gestructureerde output levert."},
+            ],
+        },
+        {
+            "kind": "next_questions",
+            "title": "Vervolgvraag",
+            "items": [
+                "Hoe maak ik bezwaar?",
+                "Ik kan niet op tijd betalen — betalingsregeling?",
+                "Kan ik huurtoeslag krijgen?",
+            ],
+        },
+        {
+            "kind": "notice",
+            "title": "Let op",
+            "body": "Stap 1.1 gebruikt een stub-search. Volgende stap: MCP bd_search (curated dataset). Daarna: A2A compose_ui (LLM bepaalt blokken).",
+        },
+    ]
+    await _set_results(sid, surface_id, blocks)
+    await _sleep_tick()
+
+    await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (Idee 1 · Stap 1.1)", step="done")

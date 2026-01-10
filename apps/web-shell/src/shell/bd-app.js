@@ -161,6 +161,16 @@ export class BdApp extends LitElement {
               <button class="btn" @click=${() => this._nav('bezwaar')}>Start</button>
             </div>
           </div>
+
+          <!-- Idee 1: GenUI Search -->
+          <div class="card tile">
+            <div class="card-title">Generatieve UI — Zoeken</div>
+            <div class="tile-icon">🔎</div>
+            <div class="card-sub">Zoek (demo) op onderwerpen en laat<br/>de UI-blokken dynamisch verschijnen.</div>
+            <div style="padding-bottom:22px;">
+              <button class="btn" @click=${() => this._nav('genui_search')}>Start</button>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -468,7 +478,6 @@ export class BdApp extends LitElement {
 
             ${this._renderStatus()}
 
-            <!-- 3 blocks: force perfect alignment -->
             <div
               class="tabs"
               style="display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: stretch; margin-top: 14px;"
@@ -496,7 +505,6 @@ export class BdApp extends LitElement {
               </div>
             </div>
 
-            <!-- Concept response full-width UNDER the row -->
             <div class="card" style="margin-top:14px;">
               <div class="card-body">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
@@ -531,6 +539,159 @@ export class BdApp extends LitElement {
     this._sendClientEvent('bezwaar', 'bezwaar/analyse', { text });
   }
 
+  // --- Idee 1: GenUI Search (UI blocks renderer) ---
+
+  _renderBlocks(blocks) {
+    const arr = Array.isArray(blocks) ? blocks : [];
+    if (!arr.length) {
+      return html`<div class="small-muted">Nog geen output. Stel een vraag en klik op “Zoek”.</div>`;
+    }
+
+    const renderOne = (b) => {
+      if (!b || typeof b !== 'object') return '';
+      const kind = b.kind || '';
+      if (kind === 'callout') {
+        return html`
+          <div class="card" style="margin-top:14px;">
+            <div class="card-body">
+              <div class="section-title" style="margin-top:0;">${b.title || 'Kern'}</div>
+              <div style="white-space:pre-wrap;">${b.body || ''}</div>
+            </div>
+          </div>
+        `;
+      }
+      if (kind === 'citations') {
+        const items = Array.isArray(b.items) ? b.items : [];
+        return html`
+          <div class="card" style="margin-top:14px;">
+            <div class="card-body">
+              <div class="section-title" style="margin-top:0;">${b.title || 'Bronnen'}</div>
+              <div class="small-muted" style="margin-bottom:8px;">Demo-bronnen (later: MCP search).</div>
+              <ul class="list">
+                ${items.map(it => html`
+                  <li>
+                    <div><a href=${it.url || '#'} target="_blank" rel="noreferrer">${it.title || it.url}</a></div>
+                    <div class="small-muted" style="margin-top:4px;">${it.snippet || ''}</div>
+                  </li>
+                `)}
+              </ul>
+            </div>
+          </div>
+        `;
+      }
+      if (kind === 'accordion') {
+        const items = Array.isArray(b.items) ? b.items : [];
+        return html`
+          <div class="card" style="margin-top:14px;">
+            <div class="card-body">
+              <div class="section-title" style="margin-top:0;">${b.title || 'Veelgestelde vragen'}</div>
+              <div style="display:grid; gap:10px; margin-top:10px;">
+                ${items.map(it => html`
+                  <details class="quote">
+                    <summary style="cursor:pointer;"><b>${it.q || ''}</b></summary>
+                    <div class="small-muted" style="margin-top:8px; white-space:pre-wrap;">${it.a || ''}</div>
+                  </details>
+                `)}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      if (kind === 'next_questions') {
+        const items = Array.isArray(b.items) ? b.items : [];
+        return html`
+          <div class="card" style="margin-top:14px;">
+            <div class="card-body">
+              <div class="section-title" style="margin-top:0;">${b.title || 'Vervolgvraag'}</div>
+              <div class="small-muted">Klik om direct opnieuw te zoeken.</div>
+              <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
+                ${items.map(q => html`
+                  <button class="pill" style="cursor:pointer;" @click=${() => this._genuiQuickSearch(String(q || ''))}>
+                    ${q}
+                  </button>
+                `)}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      if (kind === 'notice') {
+        return html`
+          <div class="status" style="margin-top:14px;">
+            <div class="status-dot"></div>
+            <div><b>${b.title || 'Let op:'}</b> ${b.body || ''}</div>
+          </div>
+        `;
+      }
+      return html`
+        <div class="card" style="margin-top:14px;">
+          <div class="card-body">
+            <div class="section-title" style="margin-top:0;">Onbekend blok</div>
+            <pre style="white-space:pre-wrap;">${JSON.stringify(b, null, 2)}</pre>
+          </div>
+        </div>
+      `;
+    };
+
+    return html`${arr.map(renderOne)}`;
+  }
+
+  _genuiQuickSearch(q) {
+    const input = this.renderRoot.querySelector('#genuiQuery');
+    if (input) input.value = q;
+    this._genuiSearch();
+  }
+
+  _genuiSearch() {
+    const loading = !!getByPointer(this.model, '/status/loading');
+    if (loading) return;
+
+    const query = (this.renderRoot.querySelector('#genuiQuery')?.value || '').trim();
+    if (!query) return;
+
+    this._sendClientEvent('genui_search', 'genui/search', { query });
+  }
+
+  _renderGenuiSearch() {
+    const loading = !!getByPointer(this.model, '/status/loading');
+    const blocks = (getByPointer(this.model, '/results') || []);
+
+    return html`
+      <div class="container">
+        <div class="topbar">
+          <button class="link" @click=${() => this._nav('home')}>← Terug</button>
+          <div class="small-muted">${this.connected ? 'Verbonden' : 'Niet verbonden'}</div>
+        </div>
+
+        <div class="card">
+          <div class="header" style="height:64px;border-radius:14px 14px 0 0;">
+            <div class="header-left">
+              <div class="logo">${logoSvg}</div>
+              <div style="font-size:26px;font-weight:650;">Generatieve UI — Zoeken</div>
+            </div>
+            <div class="hamburger">${menuSvg}</div>
+          </div>
+
+          <div class="card-body">
+            <div class="form-grid">
+              <div>Vraag:</div>
+              <input class="input" id="genuiQuery" placeholder="Bijv. 'Hoe werkt bezwaar maken?'" />
+
+              <div></div>
+              <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button class="btn" style="min-width:140px;" ?disabled=${loading} @click=${this._genuiSearch}>Zoek</button>
+              </div>
+            </div>
+
+            ${this._renderStatus()}
+
+            ${this._renderBlocks(blocks)}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   render() {
     return html`
       <div class="shell">
@@ -539,6 +700,7 @@ export class BdApp extends LitElement {
           ${this.surfaceId === 'home' ? this._renderHome() : ''}
           ${this.surfaceId === 'toeslagen' ? this._renderToeslagen() : ''}
           ${this.surfaceId === 'bezwaar' ? this._renderBezwaar() : ''}
+          ${this.surfaceId === 'genui_search' ? this._renderGenuiSearch() : ''}
         </div>
       </div>
     `;
