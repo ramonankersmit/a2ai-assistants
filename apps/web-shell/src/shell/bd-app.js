@@ -20,7 +20,7 @@ export class BdApp extends LitElement {
     this.sessionId = '';
     this.surfaceId = 'home';
     this.title = 'Belastingdienst Assistants';
-    this.model = { status: { loading: false, message: '', step: '', lastRefresh: '' }, results: [] };
+    this.model = { status: { loading: false, message: '', step: '', lastRefresh: '', source: '', sourceReason: '' }, results: [] };
     this.connected = false;
     this._es = null;
 
@@ -91,6 +91,11 @@ export class BdApp extends LitElement {
       this.title = msg.title || this.title;
       this.model = msg.dataModel || this.model;
 
+      // Backward compatible: ensure GenUI source fields exist
+      if (!this.model.status) this.model.status = {};
+      if (this.model.status.source === undefined) this.model.status.source = '';
+      if (this.model.status.sourceReason === undefined) this.model.status.sourceReason = '';
+
       this.statusHistory = [];
       this._pushStatusHistory(this.model);
 
@@ -101,6 +106,11 @@ export class BdApp extends LitElement {
       if (msg.surfaceId !== this.surfaceId) return;
 
       const nextModel = applyPatches(structuredClone(this.model), msg.patches || []);
+
+      // Backward compatible: ensure GenUI source fields exist
+      if (!nextModel.status) nextModel.status = {};
+      if (nextModel.status.source === undefined) nextModel.status.source = '';
+      if (nextModel.status.sourceReason === undefined) nextModel.status.sourceReason = '';
       this.model = nextModel;
       this._pushStatusHistory(nextModel);
 
@@ -566,7 +576,7 @@ export class BdApp extends LitElement {
           <div class="card" style="margin-top:14px;">
             <div class="card-body">
               <div class="section-title" style="margin-top:0;">${b.title || 'Bronnen'}</div>
-              <div class="small-muted" style="margin-bottom:8px;">Demo-bronnen (later: MCP search).</div>
+              <div class="small-muted" style="margin-bottom:8px;">Bronnen uit MCP (demo-dataset).</div>
               <ul class="list">
                 ${items.map(it => html`
                   <li>
@@ -652,7 +662,21 @@ export class BdApp extends LitElement {
     this._sendClientEvent('genui_search', 'genui/search', { query });
   }
 
-  _renderGenuiSearch() {
+  
+  _renderGenuiSourcePill() {
+    const source = String(getByPointer(this.model, '/status/source') || '').trim().toLowerCase();
+    const reason = String(getByPointer(this.model, '/status/sourceReason') || '').trim();
+    if (!source) return '';
+    const label = source === 'gemini' ? 'Gemini' : (source === 'fallback' ? 'Fallback' : source.toUpperCase());
+    const title = reason ? `GenUI bron: ${label} (${reason})` : `GenUI bron: ${label}`;
+    return html`
+      <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+        <div class="pill" title="${title}">GenUI: ${label}${reason ? ` · ${reason}` : ''}</div>
+      </div>
+    `;
+  }
+
+_renderGenuiSearch() {
     const loading = !!getByPointer(this.model, '/status/loading');
     const blocks = (getByPointer(this.model, '/results') || []);
 
@@ -684,6 +708,8 @@ export class BdApp extends LitElement {
             </div>
 
             ${this._renderStatus()}
+
+            ${this._renderGenuiSourcePill()}
 
             ${this._renderBlocks(blocks)}
           </div>

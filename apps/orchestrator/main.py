@@ -27,12 +27,11 @@ A2A_GENUI_URL = os.getenv("A2A_GENUI_URL", "http://localhost:8030/")
 
 hub = SessionHub()
 mcp = MCPClient(MCP_SSE_URL)
-
 a2a_toes = A2AClient(A2A_TOESLAGEN_URL)
 a2a_bez = A2AClient(A2A_BEZWAAR_URL)
 a2a_genui = A2AClient(A2A_GENUI_URL)
 
-app = FastAPI(title="Belastingdienst Assistants Orchestrator", version="0.1.3")
+app = FastAPI(title="Belastingdienst Assistants Orchestrator", version="0.1.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,6 +54,8 @@ def _home_surface_model() -> Json:
             "message": "A2UI: Kies een assistent om te starten.",
             "step": "idle",
             "lastRefresh": now_iso(),
+            "source": "",
+            "sourceReason": "",
         },
         "results": [],
     }
@@ -67,6 +68,8 @@ def _empty_surface_model(message: str) -> Json:
             "message": message,
             "step": "idle",
             "lastRefresh": now_iso(),
+            "source": "",
+            "sourceReason": "",
         },
         "results": [],
     }
@@ -87,6 +90,8 @@ async def _set_status(
     loading: Optional[bool] = None,
     message: Optional[str] = None,
     step: Optional[str] = None,
+    source: Optional[str] = None,
+    sourceReason: Optional[str] = None,
 ) -> None:
     patches: List[Json] = []
     if loading is not None:
@@ -95,6 +100,10 @@ async def _set_status(
         patches.append({"op": "replace", "path": "/status/message", "value": message})
     if step is not None:
         patches.append({"op": "replace", "path": "/status/step", "value": step})
+    if source is not None:
+        patches.append({"op": "replace", "path": "/status/source", "value": source})
+    if sourceReason is not None:
+        patches.append({"op": "replace", "path": "/status/sourceReason", "value": sourceReason})
     patches.append({"op": "replace", "path": "/status/lastRefresh", "value": now_iso()})
     await hub.push_update_and_apply(sid, surface_id, patches)
 
@@ -120,15 +129,10 @@ async def _mcp_call_with_trace(
     step: Optional[str] = None,
 ) -> Json:
     t0 = time.perf_counter()
-    try:
-        result = await mcp.call_tool(tool_name, args)
-        dt = _ms(time.perf_counter() - t0)
-        await _set_status(sid, surface_id, loading=True, message=f"MCP: {tool_name} ({dt}ms)", step=step or tool_name)
-        return result
-    except Exception:
-        dt = _ms(time.perf_counter() - t0)
-        await _set_status(sid, surface_id, loading=True, message=f"MCP: {tool_name} mislukt ({dt}ms)", step=step or tool_name)
-        raise
+    result = await mcp.call_tool(tool_name, args)
+    dt = _ms(time.perf_counter() - t0)
+    await _set_status(sid, surface_id, loading=True, message=f"MCP: {tool_name} ({dt}ms)", step=step or tool_name)
+    return result
 
 
 async def _a2a_call_with_trace(
@@ -141,15 +145,10 @@ async def _a2a_call_with_trace(
     step: Optional[str] = None,
 ) -> Json:
     t0 = time.perf_counter()
-    try:
-        result = await client.message_send(capability, payload)
-        dt = _ms(time.perf_counter() - t0)
-        await _set_status(sid, surface_id, loading=True, message=f"A2A: {capability} ({dt}ms)", step=step or capability)
-        return result
-    except Exception:
-        dt = _ms(time.perf_counter() - t0)
-        await _set_status(sid, surface_id, loading=True, message=f"A2A: {capability} mislukt ({dt}ms)", step=step or capability)
-        raise
+    result = await client.message_send(capability, payload)
+    dt = _ms(time.perf_counter() - t0)
+    await _set_status(sid, surface_id, loading=True, message=f"A2A: {capability} ({dt}ms)", step=step or capability)
+    return result
 
 
 @app.get("/health")
@@ -182,7 +181,6 @@ async def client_event(payload: Json = Body(...)):
     sid = payload.get("sessionId")
     if not sid:
         raise HTTPException(400, "Missing sessionId")
-
     s = await hub.get(sid)
     if not s:
         raise HTTPException(404, "Unknown session")
@@ -223,13 +221,7 @@ async def client_event(payload: Json = Body(...)):
 
 async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     surface_id = "toeslagen"
-
-    await _send_open_surface(
-        sid,
-        surface_id,
-        "Toeslagen Check",
-        _empty_surface_model("A2UI: Nieuwe run gestart. Bezig met verwerken…"),
-    )
+    await _send_open_surface(sid, surface_id, "Toeslagen Check", _empty_surface_model("A2UI: Nieuwe run gestart. Bezig met verwerken…"))
     await _sleep_tick()
 
     regeling = inputs.get("regeling", "Huurtoeslag")
@@ -246,7 +238,6 @@ async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     checklist = await _mcp_call_with_trace(sid, surface_id, "doc_checklist", {"regeling": regeling, "situatie": situatie}, step="doc_checklist")
     docs = checklist.get("documenten", [])
 
-    # Progressive: first 3 docs
     await _set_results(sid, surface_id, [{"kind": "documenten", "title": "Benodigde Documenten", "items": docs[:3]}])
     await _sleep_tick()
 
@@ -259,7 +250,6 @@ async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     )
     risks = notes.get("aandachtspunten", [])
 
-    # Progressive: full docs + risks
     await _set_results(sid, surface_id, [
         {"kind": "documenten", "title": "Benodigde Documenten", "items": docs},
         {"kind": "aandachtspunten", "title": "Aandachtspunten", "items": risks},
@@ -284,7 +274,6 @@ async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
         {"kind": "aandachtspunten", "title": "Aandachtspunten", "items": risks},
         {"kind": "verrijking", "title": "Verrijking (B1 + prioriteit)", "items": enriched.get("items", [])},
     ])
-
     await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. Demo-uitkomst (geen besluit).", step="done")
 
 
@@ -296,12 +285,7 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
     surface_id = "bezwaar"
     text = (inputs.get("text") or "").strip() or "Ik ben het niet eens met de naheffing van €750. Mijn inkomen is te laag voor deze aanslag. Ik vraag om herziening."
 
-    await _send_open_surface(
-        sid,
-        surface_id,
-        "Bezwaar Assistent",
-        _empty_surface_model("A2UI: Nieuwe analyse gestart. Bezig met verwerken…"),
-    )
+    await _send_open_surface(sid, surface_id, "Bezwaar Assistent", _empty_surface_model("A2UI: Nieuwe analyse gestart. Bezig met verwerken…"))
     await _sleep_tick()
 
     await _set_status(sid, surface_id, loading=True, message="A2UI: Entiteiten extraheren (MCP)…", step="extract_entities")
@@ -343,50 +327,16 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
 # Flow 3: GenUI Search (MCP bd_search + A2A compose_ui)
 # -----------------------
 
-def _genui_fallback_blocks(query: str, citations: List[Json], reason: str) -> List[Json]:
-    top = citations[0] if citations else {}
-    top_title = str(top.get("title", ""))
-    top_snip = str(top.get("snippet", ""))
-
-    return [
-        {
-            "kind": "callout",
-            "title": "Kern (fallback)",
-            "body": (
-                f"Vraag: {query}\n\n"
-                + (f"Top-bron: {top_title}\n{top_snip}\n\n" if top_title else "")
-                + f"Fallback gebruikt ({reason})."
-            ),
-        },
-        {"kind": "citations", "title": "Bronnen", "items": citations},
-        {"kind": "accordion", "title": "Veelgestelde vragen (demo)", "items": [
-            {"q": "Wat laat deze tegel zien?", "a": "De UI wordt opgebouwd uit blokken op basis van data (A2UI). De LLM bepaalt normaal welke blokken verschijnen."},
-            {"q": "Waarom niet direct HTML genereren?", "a": "Veiligheid/consistentie: alleen whitelisted blokken worden gerenderd in Belastingdienst-stijl."},
-        ]},
-        {"kind": "next_questions", "title": "Vervolgvraag", "items": [
-            "Hoe maak ik bezwaar?",
-            "Ik kan niet op tijd betalen — betalingsregeling?",
-            "Kan ik huurtoeslag krijgen?",
-        ]},
-        {"kind": "notice", "title": "Let op", "body": "Dit is demo-informatie. Raadpleeg officiële pagina’s voor actuele details."},
-    ]
-
-
 async def run_genui_search_flow(sid: str, inputs: Json) -> None:
     surface_id = "genui_search"
     query = str(inputs.get("query", "")).strip()
     if not query:
         return
 
-    await _send_open_surface(
-        sid,
-        surface_id,
-        "Generatieve UI — Zoeken",
-        _empty_surface_model("A2UI: Nieuwe zoekrun gestart…"),
-    )
+    await _send_open_surface(sid, surface_id, "Generatieve UI — Zoeken", _empty_surface_model("A2UI: Nieuwe zoekrun gestart…"))
     await _sleep_tick()
 
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Zoekopdracht ontvangen…", step="start")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Zoekopdracht ontvangen…", step="start", source="", sourceReason="")
     await _set_results(sid, surface_id, [])
     await _sleep_tick()
 
@@ -396,7 +346,7 @@ async def run_genui_search_flow(sid: str, inputs: Json) -> None:
     search_resp = await _mcp_call_with_trace(sid, surface_id, "bd_search", {"query": query, "k": 5}, step="bd_search")
     citations = search_resp.get("items", []) if isinstance(search_resp, dict) else []
 
-    # Progressive: show citations first
+    # progressive: show citations first
     await _set_results(sid, surface_id, [{"kind": "citations", "title": "Bronnen (MCP)", "items": citations}])
     await _sleep_tick()
 
@@ -404,7 +354,7 @@ async def run_genui_search_flow(sid: str, inputs: Json) -> None:
     await _sleep_tick()
 
     try:
-        ui = await _a2a_call_with_trace(
+        ui_raw = await _a2a_call_with_trace(
             sid,
             surface_id,
             a2a_genui,
@@ -412,16 +362,23 @@ async def run_genui_search_flow(sid: str, inputs: Json) -> None:
             {"query": query, "citations": citations},
             step="compose_ui",
         )
-        blocks = ui.get("blocks", []) if isinstance(ui, dict) else []
-        ui_source = ui.get("ui_source", "unknown") if isinstance(ui, dict) else "unknown"
 
-        blocks = list(blocks) if isinstance(blocks, list) else []
-        blocks.append({"kind": "notice", "title": "GenUI bron", "body": f"UI-blokken samengesteld via: {str(ui_source).upper()} (A2A compose_ui)."})
+        # GenUI agent returns {"status":"ok","data":{...}}
+        ui_data = ui_raw.get("data") if isinstance(ui_raw, dict) and isinstance(ui_raw.get("data"), dict) else ui_raw
+        if not isinstance(ui_data, dict):
+            ui_data = {}
+
+        blocks = ui_data.get("blocks", [])
+        ui_source = str(ui_data.get("ui_source", "unknown"))
+        ui_reason = str(ui_data.get("ui_source_reason", ""))
+
+        if not isinstance(blocks, list):
+            blocks = []
+
+        await _set_status(sid, surface_id, source=ui_source, sourceReason=ui_reason)
         await _set_results(sid, surface_id, blocks)
-
-        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (Idee 1 · Stap 1.3)", step="done")
+        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (GenUI)", step="done")
     except Exception:
-        fb = _genui_fallback_blocks(query, citations, reason="a2a_down_or_error")
-        fb.append({"kind": "notice", "title": "GenUI bron", "body": "UI-blokken samengesteld via: FALLBACK (A2A niet bereikbaar)."})
-        await _set_results(sid, surface_id, fb)
-        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (Idee 1 · Stap 1.3 fallback)", step="done")
+        await _set_status(sid, surface_id, source="fallback", sourceReason="a2a_down_or_error")
+        await _set_results(sid, surface_id, [{"kind": "notice", "title": "GenUI", "body": "A2A genui-agent niet bereikbaar; fallback actief."}])
+        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (GenUI fallback)", step="done")
