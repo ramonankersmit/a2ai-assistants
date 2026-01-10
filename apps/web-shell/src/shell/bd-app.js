@@ -24,14 +24,11 @@ export class BdApp extends LitElement {
     this.connected = false;
     this._es = null;
 
-    // Client-side history of status updates (most recent last)
     this.statusHistory = [];
-
-    // UI-only: collapse/expand status panel content
     this.statusCollapsed = false;
   }
 
-  createRenderRoot() { return this; } // use global CSS
+  createRenderRoot() { return this; }
 
   connectedCallback() {
     super.connectedCallback();
@@ -68,12 +65,10 @@ export class BdApp extends LitElement {
     const step = getByPointer(nextModel, '/status/step') || '';
     const lastRaw = getByPointer(nextModel, '/status/lastRefresh') || '';
 
-    // Only log meaningful updates
     const message = String(msg || '').trim();
     const stepNorm = String(step || '').trim();
     if (!message && !stepNorm) return;
 
-    // Derive a timestamp label
     const ts = this._formatTimestamp(lastRaw) !== '—'
       ? this._formatTimestamp(lastRaw)
       : this._formatTimestamp(new Date().toISOString());
@@ -82,15 +77,12 @@ export class BdApp extends LitElement {
     if (lastEntry && lastEntry.message === message && lastEntry.step === stepNorm) return;
 
     const next = [...this.statusHistory, { ts, message, step: stepNorm }];
-
-    // Keep only last 6
     this.statusHistory = next.slice(-6);
   }
 
   _handleA2UI(msg) {
     if (msg.kind === 'session/created') {
       this.sessionId = msg.sessionId;
-      // Reset history for a fresh session
       this.statusHistory = [];
       return;
     }
@@ -99,7 +91,6 @@ export class BdApp extends LitElement {
       this.title = msg.title || this.title;
       this.model = msg.dataModel || this.model;
 
-      // Reset history when switching surfaces (keeps it relevant and small)
       this.statusHistory = [];
       this._pushStatusHistory(this.model);
 
@@ -107,15 +98,10 @@ export class BdApp extends LitElement {
       return;
     }
     if (msg.kind === 'dataModelUpdate') {
-      if (msg.surfaceId !== this.surfaceId) {
-        // We keep it simple: only apply to active surface
-        return;
-      }
+      if (msg.surfaceId !== this.surfaceId) return;
 
       const nextModel = applyPatches(structuredClone(this.model), msg.patches || []);
       this.model = nextModel;
-
-      // Maintain client-side mini-log for progressive updates
       this._pushStatusHistory(nextModel);
 
       this.requestUpdate();
@@ -185,12 +171,8 @@ export class BdApp extends LitElement {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
     const s = d.toLocaleString('nl-NL', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
     });
     return s.replace(',', '');
   }
@@ -220,18 +202,14 @@ export class BdApp extends LitElement {
             const text = obj.text ? String(obj.text) : s;
             return code ? `${code} — ${text}` : text;
           }
-        } catch {
-          // ignore
-        }
+        } catch { /* ignore */ }
       }
       return s;
     }
 
     if (maybeObjectOrString && typeof maybeObjectOrString === 'object') {
       const code = maybeObjectOrString.code ? String(maybeObjectOrString.code) : '';
-      const text = maybeObjectOrString.text
-        ? String(maybeObjectOrString.text)
-        : JSON.stringify(maybeObjectOrString);
+      const text = maybeObjectOrString.text ? String(maybeObjectOrString.text) : JSON.stringify(maybeObjectOrString);
       return code ? `${code} — ${text}` : text;
     }
 
@@ -278,19 +256,13 @@ export class BdApp extends LitElement {
             ? html`<div class="small-muted" style="margin-top:6px;">${last}</div>`
             : html`
               <div class="small-muted">Step: ${step} · ${last}</div>
-
               ${this.statusHistory && this.statusHistory.length
                 ? html`
                   <div class="small-muted" style="margin-top:8px; display:grid; gap:4px;">
-                    ${this.statusHistory.map(h => html`
-                      <div>• ${h.ts} — ${h.message}${h.step ? ` (${h.step})` : ''}</div>
-                    `)}
-                  </div>
-                `
-                : ''
-              }
-            `
-          }
+                    ${this.statusHistory.map(h => html`<div>• ${h.ts} — ${h.message}${h.step ? ` (${h.step})` : ''}</div>`)}
+                  </div>`
+                : ''}
+            `}
         </div>
       </div>
     `;
@@ -376,23 +348,17 @@ export class BdApp extends LitElement {
         <div class="card" style="margin-top:10px;">
           <div class="card-body">
             <div class="section-title">Benodigde Documenten</div>
-            <ul class="list">
-              ${(docs.items || []).map(x => html`<li>${this._normalizeText(x)}</li>`)}
-            </ul>
+            <ul class="list">${(docs.items || []).map(x => html`<li>${this._normalizeText(x)}</li>`)}</ul>
           </div>
-        </div>
-      `: ''}
+        </div>` : ''}
 
       ${risks ? html`
         <div class="card" style="margin-top:14px;">
           <div class="card-body">
             <div class="section-title">Aandachtspunten</div>
-            <ul class="list">
-              ${(risks.items || []).map(x => html`<li>${this._normalizeText(x)}</li>`)}
-            </ul>
+            <ul class="list">${(risks.items || []).map(x => html`<li>${this._normalizeText(x)}</li>`)}</ul>
           </div>
-        </div>
-      `: ''}
+        </div>` : ''}
 
       ${enrich ? html`
         <div class="card" style="margin-top:14px;">
@@ -411,8 +377,7 @@ export class BdApp extends LitElement {
               `)}
             </div>
           </div>
-        </div>
-      `: ''}
+        </div>` : ''}
     `;
   }
 
@@ -455,10 +420,7 @@ export class BdApp extends LitElement {
     const actions = r0?.actions || [];
     const draftRaw = r0?.draft_response || '';
 
-    const draft_source =
-      (r0?.draft_source) ||
-      this._draftSourceFromText(draftRaw);
-
+    const draft_source = (r0?.draft_source) || this._draftSourceFromText(draftRaw);
     const draft = this._stripDraftSourcePrefix(draftRaw);
 
     const badgeLabel = draft_source === 'gemini' ? 'Gemini' : (draft_source === 'fallback' ? 'Fallback' : '');
@@ -506,6 +468,7 @@ export class BdApp extends LitElement {
 
             ${this._renderStatus()}
 
+            <!-- 3 blocks on one row -->
             <div class="tabs">
               <div class="tab">
                 <h3>Zaakoverzicht</h3>
@@ -516,23 +479,23 @@ export class BdApp extends LitElement {
 
               <div class="tab">
                 <h3>Belangrijke Punten</h3>
-                <ul class="list">
-                  ${(keyPoints || []).map(x => html`<li>${x}</li>`)}
-                </ul>
+                <ul class="list">${(keyPoints || []).map(x => html`<li>${x}</li>`)}</ul>
               </div>
 
               <div class="tab">
                 <h3>Aanbevolen Acties</h3>
-                <ul class="list">
-                  ${(actions || []).map(x => html`<li>${x}</li>`)}
-                </ul>
+                <ul class="list">${(actions || []).map(x => html`<li>${x}</li>`)}</ul>
               </div>
+            </div>
 
-              <div class="tab">
+            <!-- Concept response as full-width block UNDER the row -->
+            <div class="card" style="margin-top:14px;">
+              <div class="card-body">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-                  <h3 style="margin:0;">Concept Reactie</h3>
+                  <div class="section-title" style="margin-top:0;">Concept Reactie</div>
                   ${badgeLabel ? html`<div class="pill" title="${badgeTitle}">${badgeLabel}</div>` : ''}
                 </div>
+
                 <div style="white-space:pre-wrap; margin-top:10px;">${draft || '—'}</div>
                 <div class="small-muted" style="margin-top:10px;">Dit is een voorlopige reactie (demo).</div>
               </div>
