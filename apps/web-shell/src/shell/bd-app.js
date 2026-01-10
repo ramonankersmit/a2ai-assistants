@@ -265,6 +265,9 @@ export class BdApp extends LitElement {
   }
 
   _toeslagenCheck() {
+    const loading = !!getByPointer(this.model, '/status/loading');
+    if (loading) return;
+
     const regeling = this.renderRoot.querySelector('#regeling')?.value || 'Huurtoeslag';
     const jaar = parseInt(this.renderRoot.querySelector('#jaar')?.value || '2024', 10);
     const situatie = this.renderRoot.querySelector('#situatie')?.value || 'Alleenstaand';
@@ -368,6 +371,9 @@ export class BdApp extends LitElement {
   }
 
   _bezwaarAnalyse() {
+    const loading = !!getByPointer(this.model, '/status/loading');
+    if (loading) return;
+
     const text = this.renderRoot.querySelector('#bezwaarText')?.value || this._defaultBezwaarText();
     this._sendClientEvent('bezwaar', 'bezwaar/analyse', { text });
   }
