@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -9,7 +10,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from a2ui import SessionHub, data_model_update, now_iso, surface_open
+from a2ui import SessionHub, now_iso, surface_open
 from a2a_client import A2AClient
 from mcp_client import MCPClient
 
@@ -75,7 +76,14 @@ async def _send_open_surface(sid: str, surface_id: str, title: str, initial_mode
     await hub.push(sid, surface_open(surface_id, title, initial_model))
 
 
-async def _set_status(sid: str, surface_id: str, *, loading: Optional[bool] = None, message: Optional[str] = None, step: Optional[str] = None) -> None:
+async def _set_status(
+    sid: str,
+    surface_id: str,
+    *,
+    loading: Optional[bool] = None,
+    message: Optional[str] = None,
+    step: Optional[str] = None,
+) -> None:
     patches: List[Json] = []
     if loading is not None:
         patches.append({"op": "replace", "path": "/status/loading", "value": loading})
@@ -106,6 +114,36 @@ async def _append_results(sid: str, surface_id: str, extra: List[Json]) -> None:
 async def _sleep_tick() -> None:
     # Required: show progressive updates (do not batch)
     await asyncio.sleep(0.6)
+
+
+def _ms(dt_seconds: float) -> int:
+    return int(round(dt_seconds * 1000))
+
+
+async def _mcp_call_with_trace(
+    sid: str,
+    surface_id: str,
+    tool_name: str,
+    args: Json,
+    *,
+    step: Optional[str] = None,
+) -> Json:
+    """
+    Call an MCP tool and emit a status update including measured latency.
+
+    This intentionally uses /status/message so the web UI's statusHistory can show
+    a compact "MCP: tool (Nms)" trace line during the progressive flow.
+    """
+    t0 = time.perf_counter()
+    try:
+        result = await mcp.call_tool(tool_name, args)
+        dt = _ms(time.perf_counter() - t0)
+        await _set_status(sid, surface_id, loading=True, message=f"MCP: {tool_name} ({dt}ms)", step=step or tool_name)
+        return result
+    except Exception:
+        dt = _ms(time.perf_counter() - t0)
+        await _set_status(sid, surface_id, loading=True, message=f"MCP: {tool_name} mislukt ({dt}ms)", step=step or tool_name)
+        raise
 
 
 @app.get("/health")
@@ -180,22 +218,25 @@ async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     situatie = inputs.get("situatie", "Alleenstaand")
     loon_of_vermogen = bool(inputs.get("loonOfVermogen", True))
 
-    voorwaarden = await mcp.call_tool("rules_lookup", {"regeling": regeling, "jaar": jaar})
+    voorwaarden = await _mcp_call_with_trace(sid, surface_id, "rules_lookup", {"regeling": regeling, "jaar": jaar}, step="rules_lookup")
     await _append_results(sid, surface_id, [{"kind": "voorwaarden", "title": "Voorwaarden", "items": voorwaarden.get("voorwaarden", [])}])
 
     await _set_status(sid, surface_id, loading=True, message="Checklist samenstellen…", step="doc_checklist")
     await _sleep_tick()
 
-    checklist = await mcp.call_tool("doc_checklist", {"regeling": regeling, "situatie": situatie})
+    checklist = await _mcp_call_with_trace(sid, surface_id, "doc_checklist", {"regeling": regeling, "situatie": situatie}, step="doc_checklist")
     docs = checklist.get("documenten", [])
     await _append_results(sid, surface_id, [{"kind": "documenten", "title": "Benodigde Documenten", "items": docs[:3]}])
 
     await _set_status(sid, surface_id, loading=True, message="Aandachtspunten berekenen…", step="risk_notes")
     await _sleep_tick()
 
-    notes = await mcp.call_tool(
+    notes = await _mcp_call_with_trace(
+        sid,
+        surface_id,
         "risk_notes",
         {"regeling": regeling, "jaar": jaar, "situatie": situatie, "loonOfVermogen": loon_of_vermogen},
+        step="risk_notes",
     )
     risks = notes.get("aandachtspunten", [])
     await _append_results(sid, surface_id, [{"kind": "aandachtspunten", "title": "Aandachtspunten", "items": risks}])
@@ -225,28 +266,36 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
     text = (inputs.get("text") or "").strip()
     if not text:
         text = "Ik ben het niet eens met de naheffing van €750. Mijn inkomen is te laag voor deze aanslag. Ik vraag om herziening."
+
     await _set_status(sid, surface_id, loading=True, message="Entiteiten extraheren (MCP)…", step="extract_entities")
     await _sleep_tick()
 
-    entities = await mcp.call_tool("extract_entities", {"text": text})
+    entities = await _mcp_call_with_trace(sid, surface_id, "extract_entities", {"text": text}, step="extract_entities")
+
     # Show partial fields early
-    await _set_results(sid, surface_id, [{
-        "kind": "bezwaar",
-        "overview": {
-            "datum": entities.get("datum"),
-            "onderwerp": entities.get("onderwerp"),
-            "bedrag": entities.get("bedrag"),
-        },
-        "key_points": [],
-        "actions": [],
-        "draft_response": ""
-    }])
+    await _set_results(
+        sid,
+        surface_id,
+        [
+            {
+                "kind": "bezwaar",
+                "overview": {
+                    "datum": entities.get("datum"),
+                    "onderwerp": entities.get("onderwerp"),
+                    "bedrag": entities.get("bedrag"),
+                },
+                "key_points": [],
+                "actions": [],
+                "draft_response": "",
+            }
+        ],
+    )
 
     await _set_status(sid, surface_id, loading=True, message="Zaak classificeren…", step="classify_case")
     await _sleep_tick()
 
-    classification = await mcp.call_tool("classify_case", {"text": text})
-    snippets = await mcp.call_tool("policy_snippets", {"type": classification.get("type")})
+    classification = await _mcp_call_with_trace(sid, surface_id, "classify_case", {"text": text}, step="classify_case")
+    snippets = await _mcp_call_with_trace(sid, surface_id, "policy_snippets", {"type": classification.get("type")}, step="policy_snippets")
 
     # Patch in type + reason
     s = await hub.get(sid)
@@ -254,7 +303,8 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
     results = model.get("results") or []
     if results and isinstance(results, list) and isinstance(results[0], dict):
         results[0]["overview"]["type"] = classification.get("type")
-        results[0]["overview"]["reden"] = classification.get("reden")
+        # keep backward compat with existing demo key
+        results[0]["overview"]["reden"] = classification.get("reden") if "reden" in classification else classification.get("reason")
         results[0]["overview"]["snippets"] = snippets.get("snippets", [])
         await _set_results(sid, surface_id, results)
 
@@ -272,13 +322,19 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
     )
 
     # Replace full result with structured output (still under /results)
-    await _set_results(sid, surface_id, [{
-        "kind": "bezwaar",
-        "overview": structured.get("overview", {}),
-        "key_points": structured.get("key_points", []),
-        "actions": structured.get("actions", []),
-        "draft_response": structured.get("draft_response", ""),
-    }])
+    await _set_results(
+        sid,
+        surface_id,
+        [
+            {
+                "kind": "bezwaar",
+                "overview": structured.get("overview", {}),
+                "key_points": structured.get("key_points", []),
+                "actions": structured.get("actions", []),
+                "draft_response": structured.get("draft_response", ""),
+            }
+        ],
+    )
 
     await _set_status(sid, surface_id, loading=True, message="Concept reactie (Gemini of fallback)…", step="draft")
     await _sleep_tick()
