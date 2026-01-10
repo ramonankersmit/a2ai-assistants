@@ -11,7 +11,7 @@ from fastapi import Body, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from tools import classify_case, doc_checklist, extract_entities, policy_snippets, risk_notes, rules_lookup
+from .tools import classify_case, doc_checklist, extract_entities, policy_snippets, risk_notes, rules_lookup
 
 load_dotenv()
 
