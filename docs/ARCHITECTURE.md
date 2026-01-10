@@ -1,3 +1,4 @@
+<!-- START docs/ARCHITECTURE.md -->
 # Architectuur — Belastingdienst Assistants (MVP)
 
 Deze MVP bestaat uit een web-shell (A2UI renderer), een orchestrator (A2UI SSE + flowlogica), een MCP toolserver (SSE transport) en twee A2A agents (JSON-RPC). De Bezwaar-agent kan optioneel Gemini gebruiken.
@@ -6,21 +7,23 @@ Deze MVP bestaat uit een web-shell (A2UI renderer), een orchestrator (A2UI SSE +
 
 ```mermaid
 flowchart LR
-  U[Gebruiker] -->|Browser| W[Web Shell (Vite + Lit)\nA2UI renderer]
+  U[Gebruiker] -->|Browser| W[Web Shell (Vite + Lit)<br/>A2UI renderer]
 
-  W <-->|SSE /events\nA2UI messages| O[Orchestrator (FastAPI)\nA2UI hub + flows]
-  W -->|POST /api/client-event\nClientEvents| O
+  W <-->|SSE /events<br/>A2UI messages| O[Orchestrator (FastAPI)<br/>A2UI hub + flows]
+  W -->|POST /api/client-event<br/>ClientEvents| O
 
-  O <-->|SSE GET /sse\nJSON-RPC responses| MCP[MCP Toolserver (FastAPI)\nDeterministische tools]
-  O -->|POST /message\nJSON-RPC tools/call| MCP
+  O <-->|SSE GET /sse<br/>JSON-RPC responses| MCP[MCP Toolserver (FastAPI)<br/>Deterministische tools]
+  O -->|POST /message<br/>JSON-RPC tools/call| MCP
 
   O -->|JSON-RPC message/send| A2AT[A2A Toeslagen Agent]
   O -->|JSON-RPC message/send| A2AB[A2A Bezwaar Agent]
 
-  A2AB -->|optioneel| G[Gemini API\n(GEMINI_API_KEY)]
+  A2AB -->|optioneel| G[Gemini API<br/>(GEMINI_API_KEY)]
+```
 
 ## Sequence — Toeslagen Check (progressive updates)
 
+```mermaid
 sequenceDiagram
   participant W as Web Shell
   participant O as Orchestrator
@@ -49,9 +52,11 @@ sequenceDiagram
   O-->>W: dataModelUpdate (A2A: explain_toeslagen (Nms)) + results
 
   O-->>W: dataModelUpdate (A2UI: Klaar…)
+```
 
 ## Sequence — Bezwaar Assistent (Gemini optioneel)
 
+```mermaid
 sequenceDiagram
   participant W as Web Shell
   participant O as Orchestrator
@@ -85,4 +90,5 @@ sequenceDiagram
   A2AB-->>O: structured output
   O-->>W: dataModelUpdate (A2A: structure_bezwaar (Nms)) + results
   O-->>W: dataModelUpdate (A2UI: Klaar…)
-
+```
+<!-- END docs/ARCHITECTURE.md -->
