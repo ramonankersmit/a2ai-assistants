@@ -20,9 +20,9 @@ GEMINI_API_VERSION = os.getenv("GEMINI_API_VERSION", "v1beta").strip()
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
 
 # Demo tuning
-GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "900"))
-MIN_GEMINI_WORDS = int(os.getenv("MIN_GEMINI_WORDS", "90"))  # ~120–180 woorden target, dus 90+ als ondergrens
-TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "1.0"))
+GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "1200"))
+MIN_GEMINI_WORDS = int(os.getenv("MIN_GEMINI_WORDS", "90"))
+TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.6"))
 
 log = logging.getLogger("a2a_bezwaar_agent")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -31,7 +31,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-app = FastAPI(title="A2A Bezwaar Agent (Demo)", version="0.1.6")
+app = FastAPI(title="A2A Bezwaar Agent (Demo)", version="0.1.7")
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,7 +72,7 @@ async def agent_card():
         "url": "http://localhost:8020/",
         "capabilities": ["structure_bezwaar"],
         "protocol": "a2a-jsonrpc",
-        "version": "0.1.6",
+        "version": "0.1.7",
     }
 
 
@@ -106,21 +106,20 @@ def _deterministic_draft(overview: Json, actions: List[str]) -> str:
 
 
 def _system_instruction_text() -> str:
-    # Official API supports systemInstruction in the request body. :contentReference[oaicite:2]{index=2}
     return (
         "Je bent een medewerker van een overheidsorganisatie.\n"
         "Schrijf een concept-reactie op een bezwaarbrief.\n\n"
         "VEREISTE FORMAT (houd exact aan):\n"
         "1) Aanhef: 'Geachte heer/mevrouw,'\n"
-        "2) Alinia 1: ontvangstbevestiging + korte samenvatting van het bezwaar (max 2 zinnen)\n"
-        "3) Alinia 2: wat we gaan doen (herbeoordeling) + welke info we nog nodig hebben\n"
+        "2) Alinia 1: ontvangstbevestiging + korte samenvatting (max 2 zinnen)\n"
+        "3) Alinia 2: herbeoordeling + welke info nog nodig is\n"
         "4) Bulletlijst: 3-5 concrete gevraagde stukken/gegevens\n"
         "5) Alinia 3: vervolgstappen + algemene termijnindicatie + disclaimer concept\n"
         "6) Afsluiting: 'Met vriendelijke groet,' + '[Naam behandelaar] (concept)'\n\n"
         "LENGTE: 120–180 woorden.\n"
         "TOON: zakelijk, neutraal, zorgvuldig.\n"
         "GEEN PERSOONSGEGEVENS: gebruik placeholders.\n"
-        "Schrijf volledig; niet afbreken of dubbel beginnen."
+        "Schrijf volledig; niet dubbel beginnen; niet afbreken."
     )
 
 
@@ -138,16 +137,17 @@ def _user_prompt(raw_text: str, overview: Json, key_points: List[str], actions: 
     )
 
 
-def _extract_text_single_candidate(data: Json) -> str:
+def _extract_text_and_finish(data: Json) -> Tuple[str, str]:
     """
-    We use candidateCount=1 to avoid partial/duplicate outputs.
-    Join all parts in the single candidate.
+    candidateCount=1: join all parts from candidates[0] and read finishReason.
     """
     cands = data.get("candidates") or []
-    if not isinstance(cands, list) or not cands:
-        return ""
+    if not isinstance(cands, list) or not cands or not isinstance(cands[0], dict):
+        return "", ""
 
-    cand0 = cands[0] if isinstance(cands[0], dict) else {}
+    cand0 = cands[0]
+    finish = str(cand0.get("finishReason") or "")
+
     content = cand0.get("content") or {}
     parts = (content.get("parts") or []) if isinstance(content, dict) else []
     if not isinstance(parts, list):
@@ -160,15 +160,53 @@ def _extract_text_single_candidate(data: Json) -> str:
             if isinstance(t, str) and t.strip():
                 chunks.append(t.strip())
 
-    return "\n".join(chunks).strip()
+    return "\n".join(chunks).strip(), finish
 
 
-async def _gemini_generate(contents: List[Json], *, system_instruction: str) -> Tuple[Optional[str], str, Json]:
+def _looks_truncated(text: str, finish_reason: str) -> bool:
+    if not text:
+        return True
+
+    # If API says we hit max tokens, it is truncated. :contentReference[oaicite:1]{index=1}
+    if finish_reason == "MAX_TOKENS":
+        return True
+
+    # Missing the expected signature block -> very likely incomplete
+    if "Met vriendelijke groet" not in text or "(concept)" not in text:
+        # Allow if user deliberately didn't want it, but for this demo it's required
+        return True
+
+    # Ends in a mid-word or without punctuation (heuristic)
+    tail = text.strip()[-30:]
+    if re.search(r"[A-Za-zÀ-ÿ]{3,}$", tail) and not re.search(r"[.!?]\s*$", text.strip()):
+        return True
+
+    return False
+
+
+def _merge_continuation(base: str, cont: str) -> str:
     """
-    Returns (text_or_none, reason, raw_response_json)
+    Best-effort merge: if continuation repeats the start, drop duplicates.
+    """
+    b = (base or "").strip()
+    c = (cont or "").strip()
+    if not c:
+        return b
+
+    # If continuation contains full draft (starts with Geachte...), prefer it
+    if c.startswith("Geachte heer/mevrouw"):
+        return c
+
+    # Otherwise append
+    return (b + "\n\n" + c).strip()
+
+
+async def _gemini_generate(contents: List[Json], *, system_instruction: str) -> Tuple[Optional[str], str, str]:
+    """
+    Returns (text_or_none, reason, finishReason)
     """
     if not GEMINI_API_KEY:
-        return None, "no_api_key", {}
+        return None, "no_api_key", ""
 
     url = f"{GEMINI_BASE_URL}/{GEMINI_API_VERSION}/models/{GEMINI_MODEL}:generateContent"
     body = {
@@ -177,87 +215,89 @@ async def _gemini_generate(contents: List[Json], *, system_instruction: str) -> 
         "generationConfig": {
             "temperature": TEMPERATURE,
             "maxOutputTokens": GEMINI_MAX_TOKENS,
-            # Keep to 1 candidate for stability
             "candidateCount": 1,
         },
     }
 
+    # Use header to avoid key appearing in URLs anywhere (best practice for logs)
+    headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
+
     try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            r = await client.post(url, params={"key": GEMINI_API_KEY}, json=body)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.post(url, headers=headers, json=body)
+
             if r.status_code != 200:
                 txt = (r.text or "")[:400].replace("\n", " ")
                 log.warning("Gemini failed: status=%s url=%s body=%s", r.status_code, url, txt)
-                return None, f"http_{r.status_code}", {}
+                return None, f"http_{r.status_code}", ""
 
             data = r.json()
-            text = _extract_text_single_candidate(data)
-
-            # Log useful diagnostics (no key leakage)
+            text, finish = _extract_text_and_finish(data)
             words = _word_count(text)
-            parts_count = 0
-            try:
-                cand0 = (data.get("candidates") or [{}])[0]
-                parts_count = len(((cand0.get("content") or {}).get("parts") or []))
-                finish = cand0.get("finishReason")
-            except Exception:
-                finish = None
-            log.info("Gemini response: parts=%s words=%s finishReason=%s", parts_count, words, finish)
+
+            log.info("Gemini response: finishReason=%s words=%s", finish or "-", words)
 
             if not text:
-                return None, "no_text", data
+                return None, "no_text", finish
             if words < MIN_GEMINI_WORDS:
-                # Show sample for debugging (first 140 chars)
                 log.warning("Gemini too short (%s words). sample=%r", words, text[:140])
-                return None, "too_short", data
+                return None, "too_short", finish
 
-            return text, "ok", data
+            return text, "ok", finish
 
     except httpx.ConnectError as e:
         log.warning("Gemini connect error: %s", str(e))
-        return None, "connect_error", {}
+        return None, "connect_error", ""
     except httpx.ReadTimeout as e:
         log.warning("Gemini timeout: %s", str(e))
-        return None, "timeout", {}
+        return None, "timeout", ""
     except Exception as e:
         log.warning("Gemini exception: %s", str(e))
-        return None, "exception", {}
+        return None, "exception", ""
 
 
 async def _gemini_draft(raw_text: str, overview: Json, key_points: List[str], actions: List[str]) -> Tuple[Optional[str], str]:
-    """
-    1) Single-turn call with systemInstruction.
-    2) If too short: do a multi-turn "continue and finish" call (user→model→user).
-       This uses roles supported by the API for multi-turn. :contentReference[oaicite:3]{index=3}
-    """
     sys = _system_instruction_text()
     user = _user_prompt(raw_text, overview, key_points, actions)
 
     # Turn 1
     contents_1 = [{"role": "user", "parts": [{"text": user}]}]
-    t1, reason1, raw1 = await _gemini_generate(contents_1, system_instruction=sys)
-    if t1:
-        return t1, "ok"
-    if reason1 != "too_short":
-        return None, reason1
+    t1, reason1, finish1 = await _gemini_generate(contents_1, system_instruction=sys)
+    if not t1:
+        # If too short: one explicit retry
+        if reason1 == "too_short":
+            retry_user = user + "\n\nBELANGRIJK: schrijf volledig 120–180 woorden en rond af met afsluiting."
+            t1b, reason1b, finish1b = await _gemini_generate(
+                [{"role": "user", "parts": [{"text": retry_user}]}],
+                system_instruction=sys,
+            )
+            if not t1b:
+                return None, reason1b
+            t1, finish1 = t1b, finish1b
+        else:
+            return None, reason1
 
-    # Turn 2 (continue): include the model's short response + explicit continuation request
-    # If we have the model text, use it; otherwise just ask again.
-    model_text = ""
-    try:
-        model_text = _extract_text_single_candidate(raw1)
-    except Exception:
-        model_text = ""
+    # If it looks truncated, do a continuation turn
+    if _looks_truncated(t1, finish1):
+        cont_request = (
+            "Ga verder vanaf waar je stopte en rond de conceptbrief volledig af. "
+            "Herhaal geen eerdere tekst. Voeg de afsluiting toe (Met vriendelijke groet + [Naam behandelaar] (concept))."
+        )
+        contents_2 = [
+            {"role": "user", "parts": [{"text": user}]},
+            {"role": "model", "parts": [{"text": t1}]},
+            {"role": "user", "parts": [{"text": cont_request}]},
+        ]
+        t2, reason2, finish2 = await _gemini_generate(contents_2, system_instruction=sys)
+        if t2:
+            merged = _merge_continuation(t1, t2)
+            # If still incomplete, fall back (demo stability)
+            if _looks_truncated(merged, finish2):
+                return None, "still_truncated"
+            return merged, "ok"
+        return None, f"continue_{reason2}"
 
-    contents_2 = [
-        {"role": "user", "parts": [{"text": user}]},
-        {"role": "model", "parts": [{"text": model_text or "(te kort antwoord)"}]},
-        {"role": "user", "parts": [{"text": "Ga door en maak de conceptbrief volledig af volgens het format en 120–180 woorden."}]},
-    ]
-    t2, reason2, _ = await _gemini_generate(contents_2, system_instruction=sys)
-    if t2:
-        return t2, "ok"
-    return None, reason2
+    return t1, "ok"
 
 
 @app.post("/")
