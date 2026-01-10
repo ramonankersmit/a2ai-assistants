@@ -48,7 +48,7 @@ def _home_surface_model() -> Json:
     return {
         "status": {
             "loading": False,
-            "message": "Kies een assistent om te starten.",
+            "message": "A2UI: Kies een assistent om te starten.",
             "step": "idle",
             "lastRefresh": now_iso(),
         },
@@ -130,9 +130,7 @@ async def _mcp_call_with_trace(
 ) -> Json:
     """
     Call an MCP tool and emit a status update including measured latency.
-
-    This intentionally uses /status/message so the web UI's statusHistory can show
-    a compact "MCP: tool (Nms)" trace line during the progressive flow.
+    Message prefix is "MCP:" so the UI history lines are consistent.
     """
     t0 = time.perf_counter()
     try:
@@ -143,6 +141,31 @@ async def _mcp_call_with_trace(
     except Exception:
         dt = _ms(time.perf_counter() - t0)
         await _set_status(sid, surface_id, loading=True, message=f"MCP: {tool_name} mislukt ({dt}ms)", step=step or tool_name)
+        raise
+
+
+async def _a2a_call_with_trace(
+    sid: str,
+    surface_id: str,
+    client: A2AClient,
+    capability: str,
+    payload: Json,
+    *,
+    step: Optional[str] = None,
+) -> Json:
+    """
+    Call an A2A agent and emit a status update including measured latency.
+    Message prefix is "A2A:" so the UI history lines are consistent.
+    """
+    t0 = time.perf_counter()
+    try:
+        result = await client.message_send(capability, payload)
+        dt = _ms(time.perf_counter() - t0)
+        await _set_status(sid, surface_id, loading=True, message=f"A2A: {capability} ({dt}ms)", step=step or capability)
+        return result
+    except Exception:
+        dt = _ms(time.perf_counter() - t0)
+        await _set_status(sid, surface_id, loading=True, message=f"A2A: {capability} mislukt ({dt}ms)", step=step or capability)
         raise
 
 
@@ -190,9 +213,19 @@ async def client_event(payload: Json = Body(...)):
     if name == "nav/open":
         target = data.get("surfaceId")
         if target == "toeslagen":
-            await _send_open_surface(sid, "toeslagen", "Toeslagen Check", _empty_surface_model("Vul de gegevens in en klik op Check."))
+            await _send_open_surface(
+                sid,
+                "toeslagen",
+                "Toeslagen Check",
+                _empty_surface_model("A2UI: Vul de gegevens in en klik op Check."),
+            )
         elif target == "bezwaar":
-            await _send_open_surface(sid, "bezwaar", "Bezwaar Assistent", _empty_surface_model("Plak een bezwaarbrief en klik op Analyseer."))
+            await _send_open_surface(
+                sid,
+                "bezwaar",
+                "Bezwaar Assistent",
+                _empty_surface_model("A2UI: Plak een bezwaarbrief en klik op Analyseer."),
+            )
         else:
             await _send_open_surface(sid, "home", "Belastingdienst Assistants", _home_surface_model())
         return {"ok": True}
@@ -210,7 +243,7 @@ async def client_event(payload: Json = Body(...)):
 
 async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     surface_id = "toeslagen"
-    await _set_status(sid, surface_id, loading=True, message="Voorwaarden ophalen (MCP)…", step="rules_lookup")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Voorwaarden ophalen…", step="rules_lookup")
     await _sleep_tick()
 
     regeling = inputs.get("regeling", "Huurtoeslag")
@@ -218,17 +251,21 @@ async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     situatie = inputs.get("situatie", "Alleenstaand")
     loon_of_vermogen = bool(inputs.get("loonOfVermogen", True))
 
-    voorwaarden = await _mcp_call_with_trace(sid, surface_id, "rules_lookup", {"regeling": regeling, "jaar": jaar}, step="rules_lookup")
+    voorwaarden = await _mcp_call_with_trace(
+        sid, surface_id, "rules_lookup", {"regeling": regeling, "jaar": jaar}, step="rules_lookup"
+    )
     await _append_results(sid, surface_id, [{"kind": "voorwaarden", "title": "Voorwaarden", "items": voorwaarden.get("voorwaarden", [])}])
 
-    await _set_status(sid, surface_id, loading=True, message="Checklist samenstellen…", step="doc_checklist")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Checklist samenstellen…", step="doc_checklist")
     await _sleep_tick()
 
-    checklist = await _mcp_call_with_trace(sid, surface_id, "doc_checklist", {"regeling": regeling, "situatie": situatie}, step="doc_checklist")
+    checklist = await _mcp_call_with_trace(
+        sid, surface_id, "doc_checklist", {"regeling": regeling, "situatie": situatie}, step="doc_checklist"
+    )
     docs = checklist.get("documenten", [])
     await _append_results(sid, surface_id, [{"kind": "documenten", "title": "Benodigde Documenten", "items": docs[:3]}])
 
-    await _set_status(sid, surface_id, loading=True, message="Aandachtspunten berekenen…", step="risk_notes")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Aandachtspunten berekenen…", step="risk_notes")
     await _sleep_tick()
 
     notes = await _mcp_call_with_trace(
@@ -241,24 +278,27 @@ async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     risks = notes.get("aandachtspunten", [])
     await _append_results(sid, surface_id, [{"kind": "aandachtspunten", "title": "Aandachtspunten", "items": risks}])
 
-    await _set_status(sid, surface_id, loading=True, message="Uitleg in B1 (A2A)…", step="a2a_explain")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Uitleg in B1 (agent)…", step="a2a_explain")
     await _sleep_tick()
 
-    # Build combined items for enrichment
     combined_items: List[Json] = []
     for item in docs:
         combined_items.append({"category": "document", "text": item})
     for item in risks:
         combined_items.append({"category": "aandachtspunt", "text": item})
 
-    enriched = await a2a_toes.message_send(
+    enriched = await _a2a_call_with_trace(
+        sid,
+        surface_id,
+        a2a_toes,
         "explain_toeslagen",
         {"inputs": {"regeling": regeling, "jaar": jaar, "situatie": situatie}, "items": combined_items},
+        step="a2a_explain",
     )
 
     await _append_results(sid, surface_id, [{"kind": "verrijking", "title": "Verrijkte uitleg (B1)", "items": enriched.get("items", [])}])
 
-    await _set_status(sid, surface_id, loading=False, message="Klaar. Dit is een demo-uitkomst (geen besluit).", step="done")
+    await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. Demo-uitkomst (geen besluit).", step="done")
 
 
 async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
@@ -267,12 +307,11 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
     if not text:
         text = "Ik ben het niet eens met de naheffing van €750. Mijn inkomen is te laag voor deze aanslag. Ik vraag om herziening."
 
-    await _set_status(sid, surface_id, loading=True, message="Entiteiten extraheren (MCP)…", step="extract_entities")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Entiteiten extraheren…", step="extract_entities")
     await _sleep_tick()
 
     entities = await _mcp_call_with_trace(sid, surface_id, "extract_entities", {"text": text}, step="extract_entities")
 
-    # Show partial fields early
     await _set_results(
         sid,
         surface_id,
@@ -291,27 +330,30 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
         ],
     )
 
-    await _set_status(sid, surface_id, loading=True, message="Zaak classificeren…", step="classify_case")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Zaak classificeren…", step="classify_case")
     await _sleep_tick()
 
     classification = await _mcp_call_with_trace(sid, surface_id, "classify_case", {"text": text}, step="classify_case")
-    snippets = await _mcp_call_with_trace(sid, surface_id, "policy_snippets", {"type": classification.get("type")}, step="policy_snippets")
+    snippets = await _mcp_call_with_trace(
+        sid, surface_id, "policy_snippets", {"type": classification.get("type")}, step="policy_snippets"
+    )
 
-    # Patch in type + reason
     s = await hub.get(sid)
     model = s.get_model(surface_id) if s else {}
     results = model.get("results") or []
     if results and isinstance(results, list) and isinstance(results[0], dict):
         results[0]["overview"]["type"] = classification.get("type")
-        # keep backward compat with existing demo key
         results[0]["overview"]["reden"] = classification.get("reden") if "reden" in classification else classification.get("reason")
         results[0]["overview"]["snippets"] = snippets.get("snippets", [])
         await _set_results(sid, surface_id, results)
 
-    await _set_status(sid, surface_id, loading=True, message="Juridische structuur (A2A)…", step="a2a_structure")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Juridische structuur (agent)…", step="a2a_structure")
     await _sleep_tick()
 
-    structured = await a2a_bez.message_send(
+    structured = await _a2a_call_with_trace(
+        sid,
+        surface_id,
+        a2a_bez,
         "structure_bezwaar",
         {
             "raw_text": text,
@@ -319,9 +361,9 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
             "classification": classification,
             "snippets": snippets.get("snippets", []),
         },
+        step="a2a_structure",
     )
 
-    # Replace full result with structured output (still under /results)
     await _set_results(
         sid,
         surface_id,
@@ -336,8 +378,7 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
         ],
     )
 
-    await _set_status(sid, surface_id, loading=True, message="Concept reactie (Gemini of fallback)…", step="draft")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Concept reactie afronden…", step="draft")
     await _sleep_tick()
 
-    # Draft already produced by agent; just flip status to done.
-    await _set_status(sid, surface_id, loading=False, message="Klaar. Conceptreactie is opgesteld (demo).", step="done")
+    await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. Conceptreactie opgesteld (demo).", step="done")
