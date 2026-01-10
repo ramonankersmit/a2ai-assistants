@@ -20,16 +20,16 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 GEMINI_API_VERSION = os.getenv("GEMINI_API_VERSION", "v1beta").strip()
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
 
-GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "900"))
-TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.2"))
+# raise a bit to avoid truncation
+GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "1400"))
+TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.0"))
 
 log = logging.getLogger("a2a_genui_agent")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-app = FastAPI(title="A2A GenUI Agent (Demo)", version="0.1.3")
+app = FastAPI(title="A2A GenUI Agent (Demo)", version="0.1.4")
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,6 +45,30 @@ app.add_middleware(
 )
 
 _ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice"}
+
+# IMPORTANT: Keep schema simple (works more reliably across models)
+# This is used via generationConfig.responseSchema + responseMimeType=application/json.
+_RESPONSE_SCHEMA: Json = {
+    "type": "object",
+    "properties": {
+        "blocks": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 8,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["callout", "citations", "accordion", "next_questions", "notice"]},
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "items": {"type": "array"},
+                },
+                "required": ["kind", "title"],
+            },
+        }
+    },
+    "required": ["blocks"],
+}
 
 
 @app.on_event("startup")
@@ -63,7 +87,7 @@ async def agent_card():
         "url": "http://localhost:8030/",
         "capabilities": ["compose_ui"],
         "protocol": "a2a-jsonrpc",
-        "version": "0.1.3",
+        "version": "0.1.4",
     }
 
 
@@ -96,7 +120,6 @@ def _fallback_blocks(query: str, citations: List[Json]) -> List[Json]:
 
 
 def _system_instruction() -> str:
-    # Geen pseudo-types zoals str; alleen duidelijke instructie.
     return (
         "Je maakt UI-blokken voor een agent-gedreven interface (A2UI).\n"
         "Return EXACTLY één JSON object en niets anders.\n"
@@ -105,64 +128,43 @@ def _system_instruction() -> str:
         "Regels:\n"
         "- Nederlands (B1/B2).\n"
         "- Geen persoonsgegevens.\n"
-        "- Citations-blok moet exact de meegegeven citations gebruiken (niet verzinnen).\n"
+        "- Citations-blok moet exact de meegegeven citations gebruiken (niet verzinnen, niet aanpassen).\n"
         "- Minimaal 4 blokken.\n"
-        "- Callout: korte kern (max 6 regels).\n"
-        "- Accordion: 2-4 Q/A.\n"
-        "- Next_questions: 3-5 items.\n"
+        "- Callout max 6 regels.\n"
+        "- Accordion 2-4 Q/A.\n"
+        "- Next_questions 3-5 items.\n"
     )
-
-
-# JSON schema (subset) voor Structured Outputs: garandeert valide JSON.
-# We laten items/body op type-niveau ruim; daarna normaliseren we zelf.
-_RESPONSE_JSON_SCHEMA: Json = {
-    "type": "object",
-    "properties": {
-        "blocks": {
-            "type": "array",
-            "minItems": 4,
-            "maxItems": 8,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "kind": {"type": "string", "enum": ["callout", "citations", "accordion", "next_questions", "notice"]},
-                    "title": {"type": "string"},
-                    "body": {"type": ["string", "null"]},
-                    "items": {"type": ["array", "null"]},
-                },
-                "required": ["kind", "title"],
-                "additionalProperties": True,
-            },
-        }
-    },
-    "required": ["blocks"],
-    "additionalProperties": False,
-}
 
 
 def _extract_json(text: str) -> Optional[Json]:
     if not text:
         return None
     s = text.strip()
+
+    # Remove code fences if model ignores instruction
     s = re.sub(r"^```(?:json)?\s*", "", s)
     s = re.sub(r"\s*```$", "", s)
 
+    # Try parse whole string
     try:
         return json.loads(s)
     except Exception:
         pass
 
+    # Try substring between first { and last }
     start = s.find("{")
     end = s.rfind("}")
     if start != -1 and end != -1 and end > start:
+        candidate = s[start : end + 1]
         try:
-            return json.loads(s[start : end + 1])
+            return json.loads(candidate)
         except Exception:
             return None
+
     return None
 
 
-def _validate_and_shape(obj: Json, citations: List[Json]) -> Optional[List[Json]]:
+def _shape_blocks(obj: Json, citations: List[Json]) -> Optional[List[Json]]:
     blocks = obj.get("blocks")
     if not isinstance(blocks, list) or not blocks:
         return None
@@ -175,26 +177,23 @@ def _validate_and_shape(obj: Json, citations: List[Json]) -> Optional[List[Json]
         if kind not in _ALLOWED_KINDS:
             continue
 
-        title = str(b.get("title") or "").strip() or {
-            "callout": "Kern",
-            "citations": "Bronnen",
-            "accordion": "Veelgestelde vragen",
-            "next_questions": "Vervolgvraag",
-            "notice": "Let op",
-        }.get(kind, "Blok")
+        title = str(b.get("title") or "").strip()
+        if not title:
+            title = {
+                "callout": "Kern",
+                "citations": "Bronnen",
+                "accordion": "Veelgestelde vragen",
+                "next_questions": "Vervolgvraag",
+                "notice": "Let op",
+            }.get(kind, "Blok")
 
         if kind == "citations":
             out.append({"kind": "citations", "title": title, "items": citations})
             continue
 
-        if kind == "callout":
+        if kind in ("callout", "notice"):
             body = str(b.get("body") or "").strip()
-            out.append({"kind": "callout", "title": title, "body": body})
-            continue
-
-        if kind == "notice":
-            body = str(b.get("body") or "").strip()
-            out.append({"kind": "notice", "title": title, "body": body})
+            out.append({"kind": kind, "title": title, "body": body})
             continue
 
         if kind == "accordion":
@@ -227,43 +226,51 @@ def _validate_and_shape(obj: Json, citations: List[Json]) -> Optional[List[Json]
     return out
 
 
-async def _gemini_generate_structured(prompt_text: str) -> Tuple[Optional[str], str]:
+async def _gemini_generate(prompt_text: str) -> Tuple[Optional[str], str]:
     """
-    Uses Structured Outputs: response_mime_type + response_json_schema. :contentReference[oaicite:1]{index=1}
+    REST (generateContent) request with responseMimeType + responseSchema.
+    See: request body uses systemInstruction + generationConfig. :contentReference[oaicite:3]{index=3}
     """
     if not GEMINI_API_KEY:
         return None, "no_api_key"
 
-    url = f"{GEMINI_BASE_URL}/{GEMINI_API_VERSION}/models/{GEMINI_MODEL}:generateContent"
-    headers = {"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"}
+    url = f"{GEMINI_BASE_URL}/{GEMINI_API_VERSION}/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
-    # IMPORTANT: use the documented snake_case for structured outputs.
     body = {
-        "system_instruction": {"parts": {"text": _system_instruction()}},
-        "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
-        "generation_config": {
+        "systemInstruction": {
+            "parts": [{"text": _system_instruction()}]
+        },
+        "contents": [
+            {"role": "user", "parts": [{"text": prompt_text}]}
+        ],
+        "generationConfig": {
             "temperature": TEMPERATURE,
-            "max_output_tokens": GEMINI_MAX_TOKENS,
-            "candidate_count": 1,
-            "response_mime_type": "application/json",
-            "response_json_schema": _RESPONSE_JSON_SCHEMA,
+            "maxOutputTokens": GEMINI_MAX_TOKENS,
+            "candidateCount": 1,
+            "responseMimeType": "application/json",
+            "responseSchema": _RESPONSE_SCHEMA,
         },
     }
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(url, headers=headers, json=body)
+            r = await client.post(url, json=body)
             if r.status_code != 200:
                 return None, f"http_{r.status_code}"
 
             data = r.json()
             cand0 = (data.get("candidates") or [{}])[0]
             parts = ((cand0.get("content") or {}).get("parts") or [])
-            text = ""
-            if isinstance(parts, list):
-                text = "\n".join(
-                    [p.get("text", "") for p in parts if isinstance(p, dict) and isinstance(p.get("text"), str)]
-                ).strip()
+
+            # Join all text parts (sometimes multiple)
+            texts = []
+            for p in parts:
+                if isinstance(p, dict) and isinstance(p.get("text"), str):
+                    texts.append(p["text"])
+            text = "\n".join(texts).strip()
+
+            if not text:
+                return None, "empty_text"
             return text, "ok"
     except httpx.ConnectError:
         return None, "connect_error"
@@ -273,25 +280,49 @@ async def _gemini_generate_structured(prompt_text: str) -> Tuple[Optional[str], 
         return None, "exception"
 
 
+async def _gemini_repair_to_json(bad_output: str) -> Tuple[Optional[Json], str]:
+    """
+    Second pass: force model to emit valid JSON for schema from prior near-JSON output.
+    """
+    repair_prompt = (
+        "Converteer onderstaande output naar EXACT één valide JSON object dat voldoet aan het schema.\n"
+        "Return ONLY JSON.\n\n"
+        "OUTPUT:\n"
+        + (bad_output or "")
+    )
+    text, reason = await _gemini_generate(repair_prompt)
+    if not text or reason != "ok":
+        return None, f"repair_{reason}"
+
+    obj = _extract_json(text)
+    if isinstance(obj, dict):
+        return obj, "ok"
+    return None, "repair_bad_json"
+
+
 async def _gemini_compose(query: str, citations: List[Json]) -> Tuple[Optional[List[Json]], str]:
     payload = {"query": query, "citations": citations}
     prompt = "Maak UI-blokken voor deze vraag en bronnen. Input JSON:\n" + json.dumps(payload, ensure_ascii=False)
 
-    text, reason = await _gemini_generate_structured(prompt)
+    text, reason = await _gemini_generate(prompt)
     if not text or reason != "ok":
         return None, reason
 
     obj = _extract_json(text)
-    if not isinstance(obj, dict):
-        log.warning("Gemini structured output not parseable. sample=%r", text[:400])
-        return None, "bad_json"
+    if isinstance(obj, dict):
+        blocks = _shape_blocks(obj, citations)
+        if blocks:
+            return blocks, "ok"
 
-    blocks = _validate_and_shape(obj, citations)
-    if not blocks:
-        log.warning("Gemini JSON parsed but blocks invalid. obj_sample=%s", json.dumps(obj, ensure_ascii=False)[:400])
-        return None, "invalid_blocks"
+    # If parsing fails, log a short sample for troubleshooting, then repair.
+    log.warning("Gemini not parseable. len=%d head=%r tail=%r", len(text), text[:200], text[-200:])
+    repaired, r_reason = await _gemini_repair_to_json(text)
+    if isinstance(repaired, dict):
+        blocks2 = _shape_blocks(repaired, citations)
+        if blocks2:
+            return blocks2, "ok"
 
-    return blocks, "ok"
+    return None, "bad_json"
 
 
 @app.post("/")
