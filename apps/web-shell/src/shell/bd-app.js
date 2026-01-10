@@ -12,6 +12,7 @@ export class BdApp extends LitElement {
     model: { type: Object },
     connected: { type: Boolean },
     statusHistory: { type: Array },
+    statusCollapsed: { type: Boolean },
   };
 
   constructor() {
@@ -25,6 +26,9 @@ export class BdApp extends LitElement {
 
     // Client-side history of status updates (most recent last)
     this.statusHistory = [];
+
+    // UI-only: collapse/expand status panel content
+    this.statusCollapsed = false;
   }
 
   createRenderRoot() { return this; } // use global CSS
@@ -130,6 +134,11 @@ export class BdApp extends LitElement {
 
   _nav(surfaceId) {
     this._sendClientEvent(this.surfaceId, 'nav/open', { surfaceId });
+  }
+
+  _toggleStatusCollapse() {
+    this.statusCollapsed = !this.statusCollapsed;
+    this.requestUpdate();
   }
 
   _renderHeader() {
@@ -247,22 +256,36 @@ export class BdApp extends LitElement {
     const step = stepRaw || (loading ? 'Bezig…' : '—');
     const last = this._formatTimestamp(lastRaw);
 
+    const toggleLabel = this.statusCollapsed ? 'Uitklappen' : 'Inklappen';
+    const toggleIcon = this.statusCollapsed ? '▸' : '▾';
+
     return html`
       <div class="status">
         <div class="status-dot" style=${loading ? '' : 'background:#9ca3af; box-shadow:0 0 0 3px rgba(156,163,175,0.2);'}></div>
-        <div>
-          <div><span class="pill">${loading ? 'Bezig' : 'Status'}</span> ${message}</div>
-          <div class="small-muted">Step: ${step} · ${last}</div>
+        <div style="width:100%;">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <div><span class="pill">${loading ? 'Bezig' : 'Status'}</span> ${message}</div>
+            <button class="link" style="padding:0; white-space:nowrap;" @click=${this._toggleStatusCollapse} title="${toggleLabel}">
+              ${toggleIcon} ${toggleLabel}
+            </button>
+          </div>
 
-          ${this.statusHistory && this.statusHistory.length
-            ? html`
-              <div class="small-muted" style="margin-top:8px; display:grid; gap:4px;">
-                ${this.statusHistory.map(h => html`
-                  <div>• ${h.ts} — ${h.message}${h.step ? ` (${h.step})` : ''}</div>
-                `)}
-              </div>
+          ${this.statusCollapsed
+            ? html`<div class="small-muted" style="margin-top:6px;">${last}</div>`
+            : html`
+              <div class="small-muted">Step: ${step} · ${last}</div>
+
+              ${this.statusHistory && this.statusHistory.length
+                ? html`
+                  <div class="small-muted" style="margin-top:8px; display:grid; gap:4px;">
+                    ${this.statusHistory.map(h => html`
+                      <div>• ${h.ts} — ${h.message}${h.step ? ` (${h.step})` : ''}</div>
+                    `)}
+                  </div>
+                `
+                : ''
+              }
             `
-            : ''
           }
         </div>
       </div>
