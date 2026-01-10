@@ -154,6 +154,50 @@ export class BdApp extends LitElement {
     return '•';
   }
 
+  _normalizeText(maybeObjectOrString) {
+    // 1) plain strings
+    if (typeof maybeObjectOrString === 'string') {
+      const s = maybeObjectOrString.trim();
+
+      // If it looks like a python dict string: {'code': 'R0', 'text': '...'}
+      // Extract 'text' and optionally 'code'
+      const mText = s.match(/'text'\s*:\s*'([^']+)'/);
+      const mCode = s.match(/'code'\s*:\s*'([^']+)'/);
+      if (mText) {
+        const code = mCode ? mCode[1] : '';
+        return code ? `${code} — ${mText[1]}` : mText[1];
+      }
+
+      // If it looks like JSON with text/code
+      if ((s.startsWith('{') && s.endsWith('}')) && (s.includes('"text"') || s.includes('"code"'))) {
+        try {
+          const obj = JSON.parse(s);
+          if (obj && typeof obj === 'object') {
+            const code = obj.code ? String(obj.code) : '';
+            const text = obj.text ? String(obj.text) : s;
+            return code ? `${code} — ${text}` : text;
+          }
+        } catch {
+          // fall through
+        }
+      }
+
+      return s;
+    }
+
+    // 2) objects like {code, text} (common for MCP risk_notes)
+    if (maybeObjectOrString && typeof maybeObjectOrString === 'object') {
+      const code = maybeObjectOrString.code ? String(maybeObjectOrString.code) : '';
+      const text = maybeObjectOrString.text
+        ? String(maybeObjectOrString.text)
+        : JSON.stringify(maybeObjectOrString);
+      return code ? `${code} — ${text}` : text;
+    }
+
+    // 3) other primitives
+    return String(maybeObjectOrString ?? '');
+  }
+
   _renderStatus() {
     const loading = !!getByPointer(this.model, '/status/loading');
     const message = getByPointer(this.model, '/status/message') || '—';
@@ -252,7 +296,7 @@ export class BdApp extends LitElement {
           <div class="card-body">
             <div class="section-title">Benodigde Documenten</div>
             <ul class="list">
-              ${(docs.items || []).map(x => html`<li>${x}</li>`)}
+              ${(docs.items || []).map(x => html`<li>${this._normalizeText(x)}</li>`)}
             </ul>
           </div>
         </div>
@@ -263,7 +307,7 @@ export class BdApp extends LitElement {
           <div class="card-body">
             <div class="section-title">Aandachtspunten</div>
             <ul class="list">
-              ${(risks.items || []).map(x => html`<li>${x}</li>`)}
+              ${(risks.items || []).map(x => html`<li>${this._normalizeText(x)}</li>`)}
             </ul>
           </div>
         </div>
@@ -278,7 +322,7 @@ export class BdApp extends LitElement {
               ${(enrich.items || []).slice(0, 8).map(it => html`
                 <div class="quote">
                   <div style="display:flex;justify-content:space-between;gap:10px;">
-                    <div><b>${it.category}</b>: ${it.text}</div>
+                    <div><b>${it.category}</b>: ${this._normalizeText(it.text)}</div>
                     <div class="pill">${this._priorityIcon(it.priority)} ${it.priority}</div>
                   </div>
                   <div class="small-muted" style="margin-top:6px;">${it.b1_explanation}</div>
