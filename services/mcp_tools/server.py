@@ -1,24 +1,41 @@
+"""
+services.mcp_tools.server
+
+Standalone MCP tool server using SSE transport.
+
+Endpoints (minimal MCP SSE subset for this demo):
+- GET  /sse     : Server-Sent Events stream with JSON-RPC responses
+- POST /message : JSON-RPC ingress for tool calls (method: "tools/call")
+
+The orchestrator flow:
+1) Opens /sse
+2) POSTs JSON-RPC request to /message
+3) Waits on /sse for a JSON-RPC response with matching id
+"""
+
 from __future__ import annotations
 
 import asyncio
 import json
-import os
-import uuid
-from typing import Any, Dict, Optional
+import random
+from typing import Any, Dict, List
 
-from dotenv import load_dotenv
-from fastapi import Body, FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from .tools import classify_case, doc_checklist, extract_entities, policy_snippets, risk_notes, rules_lookup
-
-load_dotenv()
-
-Json = Dict[str, Any]
+from .tools import (
+    classify_case,
+    doc_checklist,
+    extract_entities,
+    policy_snippets,
+    risk_notes,
+    rules_lookup,
+)
 
 app = FastAPI(title="MCP Tools (Demo)", version="0.1.0")
 
+# CORS: keep it permissive for local demo
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -32,109 +49,114 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Per-SSE connection queues
-_queues: Dict[str, "asyncio.Queue[Json]"] = {}
-_lock = asyncio.Lock()
+# Connected SSE clients (each gets a queue)
+_clients: List[asyncio.Queue] = []
 
 
-async def _new_sse_id() -> str:
-    async with _lock:
-        sse_id = str(uuid.uuid4())
-        _queues[sse_id] = asyncio.Queue()
-        return sse_id
+async def _publish_sse(payload: Dict[str, Any]) -> None:
+    """Broadcast a JSON-serializable payload to all SSE clients."""
+    # Copy list to avoid mutation issues during iteration
+    for q in list(_clients):
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            # For demo: drop if client is too slow
+            pass
 
 
-async def _get_queue(sse_id: str) -> Optional["asyncio.Queue[Json]"]:
-    async with _lock:
-        return _queues.get(sse_id)
+async def _call_tool(tool_name: str, arguments: Dict[str, Any]) -> Any:
+    """
+    Deterministic tool dispatcher with fake latency 300–700ms.
+    """
+    # Fake latency (non-deterministic timing is fine; results remain deterministic)
+    await asyncio.sleep(random.uniform(0.3, 0.7))
 
+    if tool_name == "rules_lookup":
+        return rules_lookup(arguments.get("regeling"), arguments.get("jaar"))
+    if tool_name == "doc_checklist":
+        return doc_checklist(arguments.get("regeling"), arguments.get("situatie"))
+    if tool_name == "risk_notes":
+        return risk_notes(arguments)
 
-async def _drop_queue(sse_id: str) -> None:
-    async with _lock:
-        _queues.pop(sse_id, None)
+    if tool_name == "extract_entities":
+        return extract_entities(arguments.get("text", ""))
+    if tool_name == "classify_case":
+        return classify_case(arguments.get("text", ""))
+    if tool_name == "policy_snippets":
+        return policy_snippets(arguments.get("type"))
 
-
-@app.get("/health")
-async def health():
-    return {"ok": True}
+    raise ValueError(f"Unknown tool: {tool_name}")
 
 
 @app.get("/sse")
-async def sse(request: Request):
-    """MCP SSE transport endpoint."""
-    sse_id = await _new_sse_id()
-    post_url = "http://127.0.0.1:8000/message"
+async def sse():
+    """
+    SSE stream for JSON-RPC responses.
+
+    Emits:
+      event: message
+      data: <json-string>
+    """
+    q: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _clients.append(q)
 
     async def gen():
-        # Endpoint handshake
-        handshake = {"sse_id": sse_id, "post_url": post_url}
-        yield f"event: endpoint\ndata: {json.dumps(handshake)}\n\n"
-
-        q = await _get_queue(sse_id)
-        if not q:
-            return
-
         try:
+            # Small initial comment helps some proxies/browsers
+            yield ": connected\n\n"
             while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    msg = await asyncio.wait_for(q.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                yield f"event: message\ndata: {json.dumps(msg)}\n\n"
+                payload = await q.get()
+                data = json.dumps(payload, ensure_ascii=False)
+                yield f"event: message\ndata: {data}\n\n"
         finally:
-            await _drop_queue(sse_id)
+            try:
+                _clients.remove(q)
+            except ValueError:
+                pass
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.post("/message")
-async def message(
-    rpc: Json = Body(...),
-    x_sse_id: Optional[str] = Header(default=None, convert_underscores=False, alias="X-SSE-ID"),
-):
-    if not x_sse_id:
-        raise HTTPException(400, "Missing X-SSE-ID header")
-    q = await _get_queue(x_sse_id)
-    if not q:
-        raise HTTPException(404, "Unknown SSE session")
+async def message(request: Request):
+    """
+    JSON-RPC ingress for MCP SSE transport.
+
+    Expected request shape:
+      {
+        "jsonrpc": "2.0",
+        "id": "<string>",
+        "method": "tools/call",
+        "params": { "name": "<tool>", "arguments": { ... } }
+      }
+
+    Returns 200 with the JSON-RPC response AND broadcasts it on SSE.
+    """
+    try:
+        msg = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            status_code=200,
+        )
+
+    req_id = msg.get("id")
+    method = msg.get("method")
+    params = msg.get("params") or {}
+
+    if method != "tools/call":
+        resp = {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}}
+        await _publish_sse(resp)
+        return JSONResponse(resp, status_code=200)
+
+    tool_name = params.get("name")
+    arguments = params.get("arguments") or {}
 
     try:
-        method = rpc.get("method")
-        req_id = rpc.get("id")
-        if method != "tools/call":
-            await q.put({"jsonrpc": "2.0", "id": req_id, "error": {"code": -32601, "message": "Method not found"}})
-            return {"ok": True}
-
-        params = rpc.get("params") or {}
-        name = params.get("name")
-        args = params.get("arguments") or {}
-
-        result: Json
-        if name == "rules_lookup":
-            result = rules_lookup(str(args.get("regeling", "Huurtoeslag")), int(args.get("jaar", 2024)))
-        elif name == "doc_checklist":
-            result = doc_checklist(str(args.get("regeling", "Huurtoeslag")), str(args.get("situatie", "Alleenstaand")))
-        elif name == "risk_notes":
-            result = risk_notes(
-                str(args.get("regeling", "Huurtoeslag")),
-                int(args.get("jaar", 2024)),
-                str(args.get("situatie", "Alleenstaand")),
-                bool(args.get("loonOfVermogen", True)),
-            )
-        elif name == "extract_entities":
-            result = extract_entities(str(args.get("text", "")))
-        elif name == "classify_case":
-            result = classify_case(str(args.get("text", "")))
-        elif name == "policy_snippets":
-            result = policy_snippets(str(args.get("type", "Algemeen bezwaar")))
-        else:
-            await q.put({"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "Unknown tool"}})
-            return {"ok": True}
-
-        await q.put({"jsonrpc": "2.0", "id": req_id, "result": result})
-        return {"ok": True}
+        result = await _call_tool(tool_name, arguments)
+        resp = {"jsonrpc": "2.0", "id": req_id, "result": result}
     except Exception as e:
-        await q.put({"jsonrpc": "2.0", "id": rpc.get("id"), "error": {"code": -32000, "message": str(e)}})
-        return {"ok": True}
+        resp = {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": str(e)}}
+
+    await _publish_sse(resp)
+    return JSONResponse(resp, status_code=200)
