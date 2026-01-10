@@ -662,13 +662,43 @@ export class BdApp extends LitElement {
     this._sendClientEvent('genui_search', 'genui/search', { query });
   }
 
-  
+  _humanizeGenuiSourceReason(reasonRaw) {
+    const raw = String(reasonRaw || '').trim();
+    if (!raw) return { label: '', code: '' };
+
+    const r = raw.toLowerCase();
+
+    // Expected codes from the GenUI agent / orchestrator.
+    if (r === 'resource_exhausted' || r.includes('resource_exhausted')) {
+      return { code: 'resource_exhausted', label: 'Quota bereikt' };
+    }
+    if (r === 'http_429' || r.includes('http_429') || r.includes(' 429') || r.endsWith('429') || r.includes('429 too many')) {
+      return { code: 'http_429', label: 'Te veel verzoeken (HTTP 429)' };
+    }
+    if (r === 'bad_json' || r.includes('bad_json') || r.includes('invalid_json') || (r.includes('json') && (r.includes('parse') || r.includes('decode') || r.includes('error')))) {
+      return { code: 'bad_json', label: 'Ongeldige JSON-output' };
+    }
+    if (r === 'a2a_down_or_error' || r.includes('a2a_down_or_error')) {
+      return { code: 'a2a_down_or_error', label: 'GenUI-agent niet bereikbaar' };
+    }
+
+    // Default: show as-is (kept for future reason codes).
+    return { code: raw, label: raw };
+  }
+
   _renderGenuiSourcePill() {
     const source = String(getByPointer(this.model, '/status/source') || '').trim().toLowerCase();
-    const reason = String(getByPointer(this.model, '/status/sourceReason') || '').trim();
+    const reasonRaw = String(getByPointer(this.model, '/status/sourceReason') || '').trim();
+
     if (!source) return '';
+
     const label = source === 'gemini' ? 'Gemini' : (source === 'fallback' ? 'Fallback' : source.toUpperCase());
-    const title = reason ? `GenUI bron: ${label} (${reason})` : `GenUI bron: ${label}`;
+    const { label: reasonLabel } = this._humanizeGenuiSourceReason(reasonRaw);
+    const reason = String(reasonLabel || '').trim();
+
+    // Tooltip shows the raw code (useful for debugging), pill shows human-friendly text.
+    const title = reasonRaw ? `GenUI bron: ${label} · reason=${reasonRaw}` : `GenUI bron: ${label}`;
+
     return html`
       <div style="display:flex; justify-content:flex-end; margin-top:10px;">
         <div class="pill" title="${title}">GenUI: ${label}${reason ? ` · ${reason}` : ''}</div>

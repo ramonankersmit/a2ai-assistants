@@ -4,8 +4,13 @@ Standalone demo-repo met:
 - Web shell (Vite + Lit) met A2UI surfaces + `dataModelUpdate`
 - Orchestrator (FastAPI) met progressive updates (0.6s) en status-prefixes: **A2UI / MCP / A2A**
 - MCP toolserver (FastAPI) met **SSE transport** (`/sse` + `POST /message`)
-- 2x A2A agent servers (FastAPI) met agent-card + JSON-RPC (`message/send`)
-- Bezwaar-agent: **Gemini optioneel** (zichtbaar via `[Bron: Gemini]` / `[Bron: Fallback]`)
+- 3x A2A agent servers (FastAPI) met agent-card + JSON-RPC (`message/send`)
+  - Toeslagen-agent (deterministisch)
+  - Bezwaar-agent (**Gemini optioneel**) → conceptbrief met fallback
+  - GenUI-agent (**Gemini optioneel**) → dynamische UI-blokken + fallback
+
+GenUI toont in de UI een bron-pill: **GenUI: Gemini/Fallback · reden**.
+De reden is mensvriendelijk gemapt (bijv. *Quota bereikt*, *Te veel verzoeken (HTTP 429)*, *Ongeldige JSON-output*). In de tooltip staat de ruwe code.
 
 ---
 
@@ -32,7 +37,9 @@ cp .env.example .env
 copy .env.example .env
 ```
 
-Optioneel: vul `GEMINI_API_KEY` in `.env`. Zonder key wordt deterministic fallback gebruikt.
+Optioneel: vul `GEMINI_API_KEY` in `.env`.
+- Zonder key: deterministische fallback (demo blijft stabiel).
+- Met key: Bezwaar en GenUI gebruiken Gemini waar mogelijk.
 
 ### 2.2 Python venv + deps
 **Git Bash**
@@ -64,7 +71,7 @@ cd ../..
 
 ### Optie A — scripts (aanrader)
 
-**Git Bash (aanrader als je Git Bash gebruikt)**
+**Git Bash**
 ```bash
 bash scripts/run_all.sh
 ```
@@ -78,6 +85,7 @@ Poorten:
 - MCP tools: `http://127.0.0.1:8000`
 - A2A toeslagen: `http://127.0.0.1:8010`
 - A2A bezwaar: `http://127.0.0.1:8020`
+- A2A genui: `http://127.0.0.1:8030`
 - Orchestrator: `http://127.0.0.1:10002`
 - Web: `http://127.0.0.1:5173`
 
@@ -103,13 +111,19 @@ python -m uvicorn services.a2a_toeslagen_agent.server:app --host 127.0.0.1 --por
 python -m uvicorn services.a2a_bezwaar_agent.server:app --host 127.0.0.1 --port 8020
 ```
 
-**Terminal 4 (Orchestrator)**
+**Terminal 4 (A2A genui)**
+```bat
+.venv\Scripts\activate
+python -m uvicorn services.a2a_genui_agent.server:app --host 127.0.0.1 --port 8030
+```
+
+**Terminal 5 (Orchestrator)**
 ```bat
 .venv\Scripts\activate
 python -m uvicorn apps.orchestrator.main:app --host 127.0.0.1 --port 10002
 ```
 
-**Terminal 5 (Web)**
+**Terminal 6 (Web)**
 ```bat
 cd apps\web-shell
 npm run dev
@@ -120,7 +134,10 @@ npm run dev
 ## 4) Demo runbook (clicks)
 
 1. Open `http://127.0.0.1:5173`
-2. Startscherm toont tegels (Toeslagen Check / Bezwaar Assistent)
+2. Startscherm toont 3 tegels:
+   - Toeslagen Check
+   - Bezwaar Assistent
+   - Generatieve UI — Zoeken
 3. Elke run reset de surface (A2UI `surface/open`) zodat herhaalde runs weer duidelijk zichtbaar zijn.
 
 ### UI gedrag (wat je laat zien)
@@ -157,6 +174,21 @@ npm run dev
 4. In “Concept Reactie” zie je expliciet:
    - `[Bron: Gemini]` of `[Bron: Fallback]`
 
+### Demo Flow 3 — Generatieve UI — Zoeken (GenUI)
+1. Klik **Start** op *Generatieve UI — Zoeken*
+2. Typ een vraag, bijv.:
+   - “Hoe maak ik bezwaar?”
+   - “Welke documenten heb ik nodig voor huurtoeslag?”
+3. Klik **Zoek**
+4. Progressive updates (typisch):
+   - `A2UI: Bronnen ophalen (MCP)…`
+   - `MCP: bd_search (Nms)` → eerst verschijnt een “Bronnen (MCP)” blok
+   - `A2UI: UI-plan maken (A2A)…`
+   - `A2A: compose_ui (Nms)` → daarna verschijnen UI-blokken (callout/accordion/next_questions/notice)
+5. Rechtsboven in de GenUI-surface verschijnt een pill:
+   - `GenUI: Gemini · …` of `GenUI: Fallback · …`
+   - Voorbeelden van redenen: *Quota bereikt*, *Te veel verzoeken (HTTP 429)*, *Ongeldige JSON-output*.
+
 ---
 
 ## 5) Troubleshooting (Windows)
@@ -165,8 +197,10 @@ npm run dev
 - **Web laadt niet**: check of `npm install` in `apps/web-shell` is uitgevoerd.
 - **Orchestrator kan tools niet callen**: check of MCP draait en `MCP_SSE_URL` in `.env` wijst naar `http://127.0.0.1:8000/sse`.
 - **MCP /message 405 in browser**: dat is normaal; `/message` accepteert alleen **POST**.
-- **A2A call faalt**: check of agents draaien op `8010` en `8020`.
-- **Gemini faalt**: demo valt automatisch terug op fallback (zichtbaar in de UI).
+- **A2A call faalt**: check of agents draaien op `8010`, `8020`, `8030`.
+- **Gemini faalt / quota**: demo valt automatisch terug op fallback:
+  - Bezwaar: conceptbrief toont `[Bron: Fallback]`.
+  - GenUI: pill toont `GenUI: Fallback · ...` met reden.
 
 ---
 
