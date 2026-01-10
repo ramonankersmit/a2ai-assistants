@@ -12,11 +12,11 @@ import httpx
 Json = Dict[str, Any]
 
 
-def _parse_sse_events(lines):
+async def _parse_sse_events(lines):
     """Very small SSE parser. Yields (event, data_str)."""
     event = "message"
     data_lines = []
-    for line in lines:
+    async for line in lines:
         if line == "":
             if data_lines:
                 yield event, "\n".join(data_lines)
