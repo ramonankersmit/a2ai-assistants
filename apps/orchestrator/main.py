@@ -207,7 +207,6 @@ async def client_event(payload: Json = Body(...)):
         raise HTTPException(404, "Unknown session")
 
     name = payload.get("name")
-    surface_id = payload.get("surfaceId", "home")
     data = payload.get("payload") or {}
 
     if name == "nav/open":
@@ -243,6 +242,16 @@ async def client_event(payload: Json = Body(...)):
 
 async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     surface_id = "toeslagen"
+
+    # NEW: reset UI model for a fresh run (clears /results and resets UI history via surface_open)
+    await _send_open_surface(
+        sid,
+        "toeslagen",
+        "Toeslagen Check",
+        _empty_surface_model("A2UI: Nieuwe run gestart. Bezig met verwerken…"),
+    )
+    await _sleep_tick()
+
     await _set_status(sid, surface_id, loading=True, message="A2UI: Voorwaarden ophalen…", step="rules_lookup")
     await _sleep_tick()
 
@@ -254,7 +263,10 @@ async def run_toeslagen_flow(sid: str, inputs: Json) -> None:
     voorwaarden = await _mcp_call_with_trace(
         sid, surface_id, "rules_lookup", {"regeling": regeling, "jaar": jaar}, step="rules_lookup"
     )
-    await _append_results(sid, surface_id, [{"kind": "voorwaarden", "title": "Voorwaarden", "items": voorwaarden.get("voorwaarden", [])}])
+    await _append_results(
+        sid, surface_id,
+        [{"kind": "voorwaarden", "title": "Voorwaarden", "items": voorwaarden.get("voorwaarden", [])}]
+    )
 
     await _set_status(sid, surface_id, loading=True, message="A2UI: Checklist samenstellen…", step="doc_checklist")
     await _sleep_tick()
@@ -306,6 +318,15 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
     text = (inputs.get("text") or "").strip()
     if not text:
         text = "Ik ben het niet eens met de naheffing van €750. Mijn inkomen is te laag voor deze aanslag. Ik vraag om herziening."
+
+    # NEW: reset UI model for a fresh run (clears /results and resets UI history via surface_open)
+    await _send_open_surface(
+        sid,
+        "bezwaar",
+        "Bezwaar Assistent",
+        _empty_surface_model("A2UI: Nieuwe analyse gestart. Bezig met verwerken…"),
+    )
+    await _sleep_tick()
 
     await _set_status(sid, surface_id, loading=True, message="A2UI: Entiteiten extraheren…", step="extract_entities")
     await _sleep_tick()
