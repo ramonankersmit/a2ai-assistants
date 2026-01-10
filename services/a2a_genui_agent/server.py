@@ -20,16 +20,16 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 GEMINI_API_VERSION = os.getenv("GEMINI_API_VERSION", "v1beta").strip()
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com").rstrip("/")
 
-# raise a bit to avoid truncation
-GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "1400"))
-TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.0"))
+# Keep response short-ish to reduce truncation risk
+GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "1100"))
+TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.2"))
 
 log = logging.getLogger("a2a_genui_agent")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-app = FastAPI(title="A2A GenUI Agent (Demo)", version="0.1.4")
+app = FastAPI(title="A2A GenUI Agent (Demo)", version="0.1.5")
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,30 +45,6 @@ app.add_middleware(
 )
 
 _ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice"}
-
-# IMPORTANT: Keep schema simple (works more reliably across models)
-# This is used via generationConfig.responseSchema + responseMimeType=application/json.
-_RESPONSE_SCHEMA: Json = {
-    "type": "object",
-    "properties": {
-        "blocks": {
-            "type": "array",
-            "minItems": 4,
-            "maxItems": 8,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "kind": {"type": "string", "enum": ["callout", "citations", "accordion", "next_questions", "notice"]},
-                    "title": {"type": "string"},
-                    "body": {"type": "string"},
-                    "items": {"type": "array"},
-                },
-                "required": ["kind", "title"],
-            },
-        }
-    },
-    "required": ["blocks"],
-}
 
 
 @app.on_event("startup")
@@ -87,7 +63,7 @@ async def agent_card():
         "url": "http://localhost:8030/",
         "capabilities": ["compose_ui"],
         "protocol": "a2a-jsonrpc",
-        "version": "0.1.4",
+        "version": "0.1.5",
     }
 
 
@@ -124,15 +100,15 @@ def _system_instruction() -> str:
         "Je maakt UI-blokken voor een agent-gedreven interface (A2UI).\n"
         "Return EXACTLY één JSON object en niets anders.\n"
         "Geen markdown, geen uitleg, geen code fences.\n\n"
-        "Gebruik alleen kinds: callout, citations, accordion, next_questions, notice.\n"
+        "Toegestane kinds: callout, citations, accordion, next_questions, notice.\n"
         "Regels:\n"
-        "- Nederlands (B1/B2).\n"
-        "- Geen persoonsgegevens.\n"
-        "- Citations-blok moet exact de meegegeven citations gebruiken (niet verzinnen, niet aanpassen).\n"
-        "- Minimaal 4 blokken.\n"
-        "- Callout max 6 regels.\n"
-        "- Accordion 2-4 Q/A.\n"
-        "- Next_questions 3-5 items.\n"
+        "- Nederlands (B1/B2)\n"
+        "- Geen persoonsgegevens\n"
+        "- Citations-blok moet exact de meegegeven citations gebruiken (niet verzinnen)\n"
+        "- Minimaal 4 blokken\n"
+        "- Callout max 6 regels\n"
+        "- Accordion 2-4 Q/A\n"
+        "- Next_questions 3-5 items\n"
     )
 
 
@@ -140,27 +116,21 @@ def _extract_json(text: str) -> Optional[Json]:
     if not text:
         return None
     s = text.strip()
-
-    # Remove code fences if model ignores instruction
     s = re.sub(r"^```(?:json)?\s*", "", s)
     s = re.sub(r"\s*```$", "", s)
 
-    # Try parse whole string
     try:
         return json.loads(s)
     except Exception:
         pass
 
-    # Try substring between first { and last }
     start = s.find("{")
     end = s.rfind("}")
     if start != -1 and end != -1 and end > start:
-        candidate = s[start : end + 1]
         try:
-            return json.loads(candidate)
+            return json.loads(s[start : end + 1])
         except Exception:
             return None
-
     return None
 
 
@@ -177,15 +147,13 @@ def _shape_blocks(obj: Json, citations: List[Json]) -> Optional[List[Json]]:
         if kind not in _ALLOWED_KINDS:
             continue
 
-        title = str(b.get("title") or "").strip()
-        if not title:
-            title = {
-                "callout": "Kern",
-                "citations": "Bronnen",
-                "accordion": "Veelgestelde vragen",
-                "next_questions": "Vervolgvraag",
-                "notice": "Let op",
-            }.get(kind, "Blok")
+        title = str(b.get("title") or "").strip() or {
+            "callout": "Kern",
+            "citations": "Bronnen",
+            "accordion": "Veelgestelde vragen",
+            "next_questions": "Vervolgvraag",
+            "notice": "Let op",
+        }.get(kind, "Blok")
 
         if kind == "citations":
             out.append({"kind": "citations", "title": title, "items": citations})
@@ -211,13 +179,11 @@ def _shape_blocks(obj: Json, citations: List[Json]) -> Optional[List[Json]]:
 
         if kind == "next_questions":
             items = b.get("items") if isinstance(b.get("items"), list) else []
-            shaped = [str(x).strip() for x in items if str(x).strip()]
-            shaped = shaped[:5]
+            shaped = [str(x).strip() for x in items if str(x).strip()][:5]
             if len(shaped) >= 3:
                 out.append({"kind": "next_questions", "title": title, "items": shaped})
             continue
 
-    # Ensure citations exists
     if not any(x.get("kind") == "citations" for x in out):
         out.insert(0, {"kind": "citations", "title": "Bronnen", "items": citations})
 
@@ -228,8 +194,8 @@ def _shape_blocks(obj: Json, citations: List[Json]) -> Optional[List[Json]]:
 
 async def _gemini_generate(prompt_text: str) -> Tuple[Optional[str], str]:
     """
-    REST (generateContent) request with responseMimeType + responseSchema.
-    See: request body uses systemInstruction + generationConfig. :contentReference[oaicite:3]{index=3}
+    Uses the standard REST shape (systemInstruction + generationConfig).
+    No responseSchema (avoids 400 issues).
     """
     if not GEMINI_API_KEY:
         return None, "no_api_key"
@@ -237,18 +203,12 @@ async def _gemini_generate(prompt_text: str) -> Tuple[Optional[str], str]:
     url = f"{GEMINI_BASE_URL}/{GEMINI_API_VERSION}/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
     body = {
-        "systemInstruction": {
-            "parts": [{"text": _system_instruction()}]
-        },
-        "contents": [
-            {"role": "user", "parts": [{"text": prompt_text}]}
-        ],
+        "systemInstruction": {"parts": [{"text": _system_instruction()}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt_text}]}],
         "generationConfig": {
             "temperature": TEMPERATURE,
             "maxOutputTokens": GEMINI_MAX_TOKENS,
             "candidateCount": 1,
-            "responseMimeType": "application/json",
-            "responseSchema": _RESPONSE_SCHEMA,
         },
     }
 
@@ -256,22 +216,19 @@ async def _gemini_generate(prompt_text: str) -> Tuple[Optional[str], str]:
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(url, json=body)
             if r.status_code != 200:
+                # Log response body for diagnosis (trimmed)
+                log.warning("Gemini HTTP %s body=%r", r.status_code, r.text[:800])
                 return None, f"http_{r.status_code}"
 
             data = r.json()
             cand0 = (data.get("candidates") or [{}])[0]
             parts = ((cand0.get("content") or {}).get("parts") or [])
-
-            # Join all text parts (sometimes multiple)
             texts = []
             for p in parts:
                 if isinstance(p, dict) and isinstance(p.get("text"), str):
                     texts.append(p["text"])
             text = "\n".join(texts).strip()
-
-            if not text:
-                return None, "empty_text"
-            return text, "ok"
+            return text or None, "ok"
     except httpx.ConnectError:
         return None, "connect_error"
     except httpx.ReadTimeout:
@@ -282,11 +239,11 @@ async def _gemini_generate(prompt_text: str) -> Tuple[Optional[str], str]:
 
 async def _gemini_repair_to_json(bad_output: str) -> Tuple[Optional[Json], str]:
     """
-    Second pass: force model to emit valid JSON for schema from prior near-JSON output.
+    Second pass: ask Gemini to convert arbitrary output into valid JSON for our schema.
     """
     repair_prompt = (
-        "Converteer onderstaande output naar EXACT één valide JSON object dat voldoet aan het schema.\n"
-        "Return ONLY JSON.\n\n"
+        "Zet de volgende output om naar EXACT één valide JSON object met veld 'blocks'.\n"
+        "Return ONLY JSON. Geen extra tekst.\n\n"
         "OUTPUT:\n"
         + (bad_output or "")
     )
@@ -302,7 +259,11 @@ async def _gemini_repair_to_json(bad_output: str) -> Tuple[Optional[Json], str]:
 
 async def _gemini_compose(query: str, citations: List[Json]) -> Tuple[Optional[List[Json]], str]:
     payload = {"query": query, "citations": citations}
-    prompt = "Maak UI-blokken voor deze vraag en bronnen. Input JSON:\n" + json.dumps(payload, ensure_ascii=False)
+    prompt = (
+        "Maak UI-blokken (A2UI) op basis van de vraag en de bronnen.\n"
+        "Return ONLY JSON.\n"
+        "Input:\n" + json.dumps(payload, ensure_ascii=False)
+    )
 
     text, reason = await _gemini_generate(prompt)
     if not text or reason != "ok":
@@ -314,8 +275,8 @@ async def _gemini_compose(query: str, citations: List[Json]) -> Tuple[Optional[L
         if blocks:
             return blocks, "ok"
 
-    # If parsing fails, log a short sample for troubleshooting, then repair.
-    log.warning("Gemini not parseable. len=%d head=%r tail=%r", len(text), text[:200], text[-200:])
+    # Repair pass
+    log.warning("Gemini bad_json; attempting repair. head=%r tail=%r", text[:200], text[-200:])
     repaired, r_reason = await _gemini_repair_to_json(text)
     if isinstance(repaired, dict):
         blocks2 = _shape_blocks(repaired, citations)
