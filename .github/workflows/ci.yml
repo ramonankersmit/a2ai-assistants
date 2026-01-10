@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Python import checks
+        run: |
+          python -c "import services.mcp_tools.server"
+          python -c "import services.mcp_tools.tools"
+          python -c "import services.a2a_toeslagen_agent.server"
+          python -c "import services.a2a_bezwaar_agent.server"
+          python -c "import apps.orchestrator.main"
+          python -c "import apps.orchestrator.mcp_client"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Web install + build
+        working-directory: apps/web-shell
+        run: |
+          npm ci
+          npm run build
