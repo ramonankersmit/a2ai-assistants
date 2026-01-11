@@ -841,6 +841,28 @@ def _extract_first_form_block(blocks: List[Json]) -> Optional[Json]:
     return None
 
 
+def _boost_query(query: str) -> str:
+    """Deterministische query-expansie (veilig), zodat bd_search vaker relevante hits heeft."""
+    q = (query or "").strip()
+    if not q:
+        return ""
+
+    low = q.lower()
+    expansions: list[str] = []
+
+    if any(k in low for k in ["bezwaar", "bezwaarschrift", "beroep"]):
+        expansions += ["bezwaar indienen", "termijn", "uitspraak op bezwaar"]
+
+    if any(k in low for k in ["uitstel", "betalingsregeling", "betaal", "betalen", "incasso"]):
+        expansions += ["uitstel van betaling", "betalingsregeling", "betaaltermijn"]
+
+    if any(k in low for k in ["toeslag", "toeslagen"]):
+        expansions += ["huurtoeslag", "zorgtoeslag", "kinderopvangtoeslag", "kindgebonden budget", "toeslagpartner"]
+
+    # Alleen extra termen toevoegen als ze nog niet in de query staan
+    extras = [e for e in expansions if e.lower() not in low]
+    return q if not extras else (q + " " + " ".join(extras))
+
 async def run_genui_form_generate_flow(sid: str, inputs: Json) -> None:
     surface_id = "genui_form"
     query = str(inputs.get("query", "")).strip()
