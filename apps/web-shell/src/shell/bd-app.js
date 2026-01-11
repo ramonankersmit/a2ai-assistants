@@ -867,6 +867,11 @@ if (kind === 'notice') {
       return { code: 'deterministic_tree', label: 'Deterministische wizard' };
     }
 
+    // Default: show as-is
+    if (r === 'deterministic_form' || r.includes('deterministic_form')) {
+      return { code: 'deterministic_form', label: 'Deterministisch formulier' };
+    }
+
     // Default: show as-is (kept for future reason codes).
     return { code: raw, label: raw };
   }
@@ -917,8 +922,7 @@ _renderGenuiSearch() {
               <input class="input" id="genuiQuery" placeholder="Bijv. 'Hoe werkt bezwaar maken?'" />
 
               <div></div>
-              <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-              <div class="small-muted">Pad: ${pathLabel}</div>
+              <div style="display:flex; justify-content:flex-end; gap:10px;">
                 <button class="btn" style="min-width:140px;" ?disabled=${loading} @click=${this._genuiSearch}>Zoek</button>
               </div>
             </div>

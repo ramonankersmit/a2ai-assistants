@@ -166,6 +166,24 @@ def _safe_str(value: Any, *, max_len: int = 4000) -> str:
     return s
 
 
+def _a2a_data_dict(resp: Any) -> Dict[str, Any]:
+    """Extract a dict payload from multiple possible A2A client response shapes."""
+    if not isinstance(resp, dict):
+        return {}
+    data = resp.get("data")
+    if isinstance(data, dict):
+        return data
+    result = resp.get("result")
+    if isinstance(result, dict):
+        return result
+    payload = resp.get("payload")
+    if isinstance(payload, dict):
+        return payload
+    # Last resort: treat the top-level dict as payload
+    return resp
+
+
+
 def _sanitize_citations_items(items: Any, *, max_items: int = 10) -> List[Json]:
     out: List[Json] = []
     if not isinstance(items, list):
@@ -892,11 +910,15 @@ async def run_genui_form_generate_flow(sid: str, inputs: Json) -> None:
     await _sleep_tick()
 
     try:
-        resp = await _a2a_call_with_trace(sid, surface_id, a2a_genui, "compose_form", {"query": query, "citations": citations}, step="compose_form")
-        data = resp.get("data") if isinstance(resp, dict) else None
-        blocks_raw = (data.get("blocks") if isinstance(data, dict) else None) or []
-        ui_source = (data.get("ui_source") if isinstance(data, dict) else "") or "fallback"
-        ui_reason = (data.get("ui_source_reason") if isinstance(data, dict) else "") or "deterministic_form"
+        resp = await _a2a_call_with_trace(sid, surface_id, a2a_genui_url, "compose_form", {"query": query, "citations": citations}, step="compose_form")
+data = _a2a_data_dict(resp)
+
+blocks_raw = data.get("blocks") or []
+if isinstance(blocks_raw, dict):
+    blocks_raw = [blocks_raw]
+
+ui_source = str(data.get("ui_source") or "fallback")
+ui_reason = str(data.get("ui_source_reason") or "deterministic_form")
 
         blocks = _sanitize_genui_blocks(blocks_raw)
 
