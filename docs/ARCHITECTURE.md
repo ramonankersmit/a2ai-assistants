@@ -1,6 +1,6 @@
-# Belastingdienst Assistants — Architecture
+# Overheid Assistants — Architecture
 
-Deze repo is een **standalone demo-MVP** (“Belastingdienst Assistants”) met een minimale, maar complete end‑to‑end keten voor:
+Deze repo is een **standalone demo-MVP** (“Overheid Assistants”) met een minimale, maar complete end‑to‑end keten voor:
 - **A2UI** (UI opgebouwd uit data/blocks)
 - **MCP** (deterministische tools)
 - **A2A** (agent-calls via JSON‑RPC)

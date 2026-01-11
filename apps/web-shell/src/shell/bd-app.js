@@ -45,7 +45,7 @@ export class BdApp extends LitElement {
     super();
     this.sessionId = '';
     this.surfaceId = 'home';
-    this.title = 'Belastingdienst Assistants';
+    this.title = 'Overheid Assistants';
     this.model = { status: { loading: false, message: '', step: '', lastRefresh: '', source: '', sourceReason: '' }, results: [] };
     this.connected = false;
     this._es = null;
@@ -218,7 +218,7 @@ if (this.surfaceId === 'genui_tree') {
       <div class="header">
         <div class="header-left">
           <div class="logo" aria-hidden="true">${logoSvg}</div>
-          <div class="brand">Belastingdienst</div>
+          <div class="brand">Overheid</div>
         </div>
         <div class="hamburger" title="Menu" aria-hidden="true">${menuSvg}</div>
       </div>

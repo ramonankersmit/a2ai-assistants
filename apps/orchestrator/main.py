@@ -67,7 +67,7 @@ a2a_toes = A2AClient(A2A_TOESLAGEN_URL)
 a2a_bez = A2AClient(A2A_BEZWAAR_URL)
 a2a_genui = A2AClient(A2A_GENUI_URL)
 
-app = FastAPI(title="Belastingdienst Assistants Orchestrator", version="0.1.6")
+app = FastAPI(title="Overheid Assistants Orchestrator", version="0.1.6")
 
 app.add_middleware(
     CORSMiddleware,
@@ -424,7 +424,7 @@ async def events(request: Request):
 
     async def gen():
         yield f"data: {JSONResponse(content={'kind':'session/created','sessionId':session.session_id}).body.decode('utf-8')}\n\n"
-        await _send_open_surface(session.session_id, "home", "Belastingdienst Assistants", _home_surface_model())
+        await _send_open_surface(session.session_id, "home", "Overheid Assistants", _home_surface_model())
 
         while True:
             if await request.is_disconnected():
@@ -464,7 +464,7 @@ async def client_event(payload: Json = Body(...)):
             await _send_open_surface(sid, "genui_tree", "Generatieve UI — Wizard", _empty_surface_model("A2UI: Start de wizard…"))
             asyncio.create_task(run_genui_tree_start_flow(sid, {}))
         else:
-            await _send_open_surface(sid, "home", "Belastingdienst Assistants", _home_surface_model())
+            await _send_open_surface(sid, "home", "Overheid Assistants", _home_surface_model())
         return {"ok": True}
 
     if name == "toeslagen/check":

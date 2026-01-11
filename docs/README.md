@@ -1,4 +1,4 @@
-# Belastingdienst Assistants — Docs
+# Overheid Assistants — Docs
 
 Deze map bevat de documentatie voor de standalone MVP demo.
 

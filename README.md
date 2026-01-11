@@ -1,4 +1,4 @@
-# AGENTS.md — Belastingdienst Assistants (MVP)
+# AGENTS.md — Overheid Assistants (MVP)
 
 ## Componenten (processen)
 
@@ -113,7 +113,7 @@ Orchestrator roept A2A agent aan met JSON-RPC:
 
 ## Demo talk track (± 5 minuten)
 
-1. **Start**: “Dit is een minimalistische Belastingdienst-achtige shell met twee assistenten.”
+1. **Start**: “Dit is een minimalistische Overheid-achtige shell met twee assistenten.”
 2. **A2UI**: “De UI krijgt surfaces en dataModelUpdate patches via SSE; we tonen bewust progressive updates.”
 3. **Flow Toeslagen**:
    - “Orchestrator calls MCP tools deterministisch (rules/checklist/risks) met fake latency.”

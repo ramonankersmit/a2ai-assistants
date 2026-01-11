@@ -13,7 +13,7 @@ def _tokenize(s: str) -> List[str]:
 
 
 def _load_pages() -> List[Json]:
-    """Load curated Belastingdienst pages dataset (demo-safe, deterministic)."""
+    """Load curated Overheid pages dataset (demo-safe, deterministic)."""
     here = os.path.dirname(__file__)
     path = os.path.join(here, "data", "bd_pages.json")
     with open(path, "r", encoding="utf-8") as f:
@@ -43,7 +43,7 @@ def _score_page(tokens: List[str], title: str, snippet: str, keywords: List[str]
 
 def bd_search(query: str, k: int = 5) -> Json:
     """
-    Demo MCP tool: search Belastingdienst.nl content from a curated local dataset.
+    Demo MCP tool: search Overheid.nl content from a curated local dataset.
 
     Args:
       query: free-text query

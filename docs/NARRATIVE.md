@@ -1,7 +1,7 @@
 60 seconden talk-track (voorlezen in demo)
 
 “Wat je hier ziet is A2UI: agent-gedreven interfaces via berichten, niet via HTML.
-De web-client is een vaste Belastingdienst-achtige UI (Lit), maar de orchestrator stuurt het schermgedrag door A2UI-berichten over SSE.
+De web-client is een vaste Overheid-achtige UI (Lit), maar de orchestrator stuurt het schermgedrag door A2UI-berichten over SSE.
 
 Stap 1: ik kies een assistent. De orchestrator stuurt surface/open met het initiële dataModel.
 Stap 2: als ik op ‘Check’ of ‘Analyseer’ druk, stuurt de UI een ClientEvent naar de orchestrator.

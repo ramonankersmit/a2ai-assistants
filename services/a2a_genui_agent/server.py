@@ -74,7 +74,7 @@ def _fallback_blocks(query: str, citations: List[Json]) -> List[Json]:
 
     faq = [
         {"q": "Wat laat deze tegel zien?", "a": "De UI wordt opgebouwd uit blokken op basis van data (A2UI). In stap 1.3 kiest de LLM de blokken."},
-        {"q": "Waarom niet direct HTML genereren?", "a": "Veiligheid/consistentie: alleen whitelisted blokken worden gerenderd in Belastingdienst-stijl."},
+        {"q": "Waarom niet direct HTML genereren?", "a": "Veiligheid/consistentie: alleen whitelisted blokken worden gerenderd in Overheid-stijl."},
     ]
     next_q = ["Hoe maak ik bezwaar?", "Ik kan niet op tijd betalen — betalingsregeling?", "Kan ik huurtoeslag krijgen?"]
 
@@ -230,7 +230,7 @@ def _tree_leaf_blocks(topic: str, path: List[str]) -> List[Json]:
 
     next_q = [
         "Wat is de termijn en wat moet ik meesturen?",
-        "Kan ik dit online regelen via Mijn Belastingdienst?",
+        "Kan ik dit online regelen via Mijn Overheid?",
         "Welke vervolgstap past bij mijn situatie?",
     ]
 
