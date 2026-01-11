@@ -1,4 +1,4 @@
-# Belastingdienst Assistants (MVP) — README_DEMO
+# Overheid Assistants (MVP) — README_DEMO
 
 Standalone demo-repo met:
 - Web shell (Vite + Lit) met A2UI surfaces + `dataModelUpdate`

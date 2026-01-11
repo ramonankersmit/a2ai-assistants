@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Repository overview
-This repo contains a standalone demo stack for “Belastingdienst Assistants” (A2UI + MCP + A2A):
+This repo contains a standalone demo stack for “Overheid Assistants” (A2UI + MCP + A2A):
 - `apps/web-shell`: Vite + Lit UI shell for A2UI surfaces.
 - `apps/orchestrator`: FastAPI orchestrator that coordinates MCP tools and A2A agents (SSE `/events`, POST `/api/client-event`).
 - `services/mcp_tools`: FastAPI tool server exposing deterministic MCP tools over SSE (`/sse`, POST `/message`).
