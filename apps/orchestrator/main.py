@@ -911,14 +911,14 @@ async def run_genui_form_generate_flow(sid: str, inputs: Json) -> None:
 
     try:
         resp = await _a2a_call_with_trace(sid, surface_id, a2a_genui_url, "compose_form", {"query": query, "citations": citations}, step="compose_form")
-data = _a2a_data_dict(resp)
+        data = _a2a_data_dict(resp)
 
-blocks_raw = data.get("blocks") or []
-if isinstance(blocks_raw, dict):
-    blocks_raw = [blocks_raw]
+        blocks_raw = data.get("blocks") or []
+        if isinstance(blocks_raw, dict):
+            blocks_raw = [blocks_raw]
 
-ui_source = str(data.get("ui_source") or "fallback")
-ui_reason = str(data.get("ui_source_reason") or "deterministic_form")
+        ui_source = str(data.get("ui_source") or "fallback")
+        ui_reason = str(data.get("ui_source_reason") or "deterministic_form")
 
         blocks = _sanitize_genui_blocks(blocks_raw)
 
