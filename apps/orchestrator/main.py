@@ -25,6 +25,11 @@ A2A_TOESLAGEN_URL = os.getenv("A2A_TOESLAGEN_URL", "http://localhost:8010/")
 A2A_BEZWAAR_URL = os.getenv("A2A_BEZWAAR_URL", "http://localhost:8020/")
 A2A_GENUI_URL = os.getenv("A2A_GENUI_URL", "http://localhost:8030/")
 
+
+# In-memory demo state (per session). Kept intentionally small and deterministic.
+_GENUI_TREE_STATE: Dict[str, Dict[str, Any]] = {}
+_GENUI_FORM_STATE: Dict[str, Dict[str, Any]] = {}
+
 hub = SessionHub()
 mcp = MCPClient(MCP_SSE_URL)
 a2a_toes = A2AClient(A2A_TOESLAGEN_URL)
@@ -155,7 +160,7 @@ async def _a2a_call_with_trace(
 # GenUI: defensive block validation (whitelist)
 # -----------------------
 
-GENUI_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice", "decision", "form"}
+GENUI_ALLOWED_KINDS = {"accordion", "callout", "citations", "decision", "form", "next_questions", "notice"}
 
 
 def _safe_str(value: Any, *, max_len: int = 4000) -> str:
@@ -166,23 +171,17 @@ def _safe_str(value: Any, *, max_len: int = 4000) -> str:
     return s
 
 
-def _a2a_data_dict(resp: Any) -> Dict[str, Any]:
-    """Extract a dict payload from multiple possible A2A client response shapes."""
-    if not isinstance(resp, dict):
-        return {}
-    data = resp.get("data")
-    if isinstance(data, dict):
-        return data
-    result = resp.get("result")
-    if isinstance(result, dict):
-        return result
-    payload = resp.get("payload")
-    if isinstance(payload, dict):
-        return payload
-    # Last resort: treat the top-level dict as payload
-    return resp
 
 
+def _tree_start_blocks() -> List[Json]:
+    return [
+        {
+            "kind": "decision",
+            "title": "Stap 1",
+            "question": "Waar gaat uw vraag over?",
+            "options": ["Bezwaar maken", "Betalen/uitstel", "Toeslagen"],
+        }
+    ]
 
 def _sanitize_citations_items(items: Any, *, max_items: int = 10) -> List[Json]:
     out: List[Json] = []
@@ -224,61 +223,6 @@ def _sanitize_next_questions(items: Any, *, max_items: int = 8) -> List[str]:
         q = _safe_str(it, max_len=200)
         if q:
             out.append(q)
-    return out
-
-
-def _sanitize_decision_options(options: Any, *, max_items: int = 6) -> List[str]:
-    out: List[str] = []
-    if isinstance(options, list):
-        for it in options[:max_items]:
-            if isinstance(it, dict):
-                label = _safe_str(it.get("label") or it.get("text") or it.get("value") or "", max_len=80)
-            else:
-                label = _safe_str(it, max_len=80)
-            if label:
-                out.append(label)
-    return out
-
-
-
-def _sanitize_form_fields(fields: Any, *, max_fields: int = 10) -> List[Json]:
-    out: List[Json] = []
-    if not isinstance(fields, list):
-        return out
-    for f in fields[:max_fields]:
-        if not isinstance(f, dict):
-            continue
-        fid = _safe_str(f.get("id") or "", max_len=40)
-        if not fid:
-            continue
-        ftype = _safe_str(f.get("type") or "text", max_len=20).lower()
-        if ftype not in ("text", "number", "date", "email", "textarea", "select"):
-            ftype = "text"
-
-        options = f.get("options") or []
-        if not isinstance(options, list):
-            options = []
-        options_s: List[str] = []
-        for o in options[:12]:
-            label = _safe_str(o, max_len=80)
-            if label:
-                options_s.append(label)
-
-        out.append(
-            {
-                "id": fid,
-                "label": _safe_str(f.get("label") or fid, max_len=120),
-                "type": ftype,
-                "required": bool(f.get("required", False)),
-                "placeholder": _safe_str(f.get("placeholder") or "", max_len=160),
-                "pattern": _safe_str(f.get("pattern") or "", max_len=120),
-                "min": f.get("min"),
-                "max": f.get("max"),
-                "minLength": f.get("minLength"),
-                "maxLength": f.get("maxLength"),
-                "options": options_s,
-            }
-        )
     return out
 
 
@@ -334,34 +278,6 @@ def _sanitize_genui_blocks(blocks: Any, *, max_blocks: int = 12) -> List[Json]:
                 }
             )
             continue
-
-
-        if kind == "decision":
-            out.append(
-                {
-                    "kind": "decision",
-                    "title": _safe_str(b.get("title") or "Keuze", max_len=140),
-                    "question": _safe_str(b.get("question") or b.get("q") or "Kies een optie", max_len=240),
-                    "options": _sanitize_decision_options(b.get("options") or b.get("items") or []),
-                }
-            )
-            continue
-
-
-
-        if kind == "form":
-            out.append(
-                {
-                    "kind": "form",
-                    "title": _safe_str(b.get("title") or "Formulier", max_len=140),
-                    "formId": _safe_str(b.get("formId") or b.get("id") or "form", max_len=40),
-                    "description": _safe_str(b.get("description") or "", max_len=400),
-                    "submitLabel": _safe_str(b.get("submitLabel") or "Verstuur", max_len=60),
-                    "fields": _sanitize_form_fields(b.get("fields") or []),
-                }
-            )
-            continue
-
 
         if kind == "notice":
             out.append(
@@ -421,11 +337,10 @@ async def client_event(payload: Json = Body(...)):
             await _send_open_surface(sid, "bezwaar", "Bezwaar Assistent", _empty_surface_model("A2UI: Plak een bezwaarbrief en klik op Analyseer."))
         elif target == "genui_search":
             await _send_open_surface(sid, "genui_search", "Generatieve UI — Zoeken", _empty_surface_model("A2UI: Stel een vraag en klik op Zoek."))
-        elif target == "genui_form":
-            await _send_open_surface(sid, "genui_form", "Generatieve UI — Formulier", _empty_surface_model("A2UI: Stel een vraag en klik op Genereer formulier."))
         elif target == "genui_tree":
-            await _send_open_surface(sid, "genui_tree", "Generatieve UI — Wizard", _empty_surface_model("A2UI: Start de wizard…"))
-            asyncio.create_task(run_genui_tree_start_flow(sid, {}))
+            await _send_open_surface(sid, "genui_tree", "Generatieve UI — Wizard", _empty_surface_model("A2UI: Klik op Opnieuw starten."))
+        elif target == "genui_form":
+            await _send_open_surface(sid, "genui_form", "Generatieve UI — Formulier", _empty_surface_model("A2UI: Typ een vraag en klik op Genereer formulier."))
         else:
             await _send_open_surface(sid, "home", "Belastingdienst Assistants", _home_surface_model())
         return {"ok": True}
@@ -442,24 +357,25 @@ async def client_event(payload: Json = Body(...)):
         asyncio.create_task(run_genui_search_flow(sid, data))
         return {"ok": True}
 
-    if name == "genui/form_generate":
-        asyncio.create_task(run_genui_form_generate_flow(sid, data))
-        return {"ok": True}
-
-    if name == "genui/form_submit":
-        asyncio.create_task(run_genui_form_submit_flow(sid, data))
-        return {"ok": True}
-
-    if name == "genui/form_change":
-        asyncio.create_task(run_genui_form_change_flow(sid, data))
-        return {"ok": True}
 
     if name == "genui_tree/start":
-        asyncio.create_task(run_genui_tree_start_flow(sid, data))
+        asyncio.create_task(run_genui_tree_start_flow(sid))
         return {"ok": True}
 
     if name == "genui_tree/choose":
         asyncio.create_task(run_genui_tree_choose_flow(sid, data))
+        return {"ok": True}
+
+    if name == "genui_form/generate":
+        asyncio.create_task(run_genui_form_generate_flow(sid, data))
+        return {"ok": True}
+
+    if name == "genui_form/change":
+        asyncio.create_task(run_genui_form_change_flow(sid, data))
+        return {"ok": True}
+
+    if name == "genui_form/submit":
+        asyncio.create_task(run_genui_form_submit_flow(sid, data))
         return {"ok": True}
 
     return {"ok": True, "ignored": True}
@@ -577,6 +493,79 @@ async def run_bezwaar_flow(sid: str, inputs: Json) -> None:
 # Flow 3: GenUI Search (MCP bd_search + A2A compose_ui)
 # -----------------------
 
+
+
+def _validate_form_values(fields: List[Json], values: Dict[str, Any]) -> Tuple[bool, List[Json]]:
+    errors: List[Json] = []
+    for f in fields:
+        if not isinstance(f, dict):
+            continue
+        fid = str(f.get("id") or "").strip()
+        if not fid:
+            continue
+        label = str(f.get("label") or fid)
+        required = bool(f.get("required", False))
+        ftype = str(f.get("type") or "text")
+        v = values.get(fid)
+
+        s = "" if v is None else str(v).strip()
+        if required and not s:
+            errors.append({"field": fid, "message": f"{label} is verplicht."})
+            continue
+
+        if not s:
+            continue
+
+        min_len = f.get("minLength")
+        max_len = f.get("maxLength")
+        try:
+            if min_len is not None and len(s) < int(min_len):
+                errors.append({"field": fid, "message": f"{label} is te kort (min. {int(min_len)} tekens)."})
+        except Exception:
+            pass
+        try:
+            if max_len is not None and len(s) > int(max_len):
+                errors.append({"field": fid, "message": f"{label} is te lang (max. {int(max_len)} tekens)."})
+        except Exception:
+            pass
+
+        if ftype == "email" and s and ("@" not in s or "." not in s.split("@")[-1]):
+            errors.append({"field": fid, "message": f"{label} lijkt geen geldig e-mailadres."})
+
+    return (len(errors) == 0), errors
+
+
+def _extend_form_fields(fields: List[Json], values: Dict[str, Any], query: str) -> List[Json]:
+    out: List[Json] = [f for f in fields if isinstance(f, dict)]
+    ids = {str(f.get("id")) for f in out if isinstance(f, dict) and f.get("id")}
+
+    def add(field: Json) -> None:
+        fid = str(field.get("id") or "").strip()
+        if not fid or fid in ids:
+            return
+        out.append(field)
+        ids.add(fid)
+
+    qlow = (query or "").lower()
+    kenmerk = str(values.get("kenmerk") or "").strip()
+    if kenmerk and len(kenmerk) >= 6:
+        add({"id": "dagtekening", "label": "Dagtekening (op brief/aanslag)", "type": "date", "required": False})
+
+    bedrag_raw = values.get("bedrag")
+    try:
+        bedrag = float(bedrag_raw) if bedrag_raw not in (None, "") else 0.0
+    except Exception:
+        bedrag = 0.0
+
+    if bedrag > 0:
+        add({"id": "voorkeur", "label": "Waar gaat uw verzoek over?", "type": "select", "required": False, "options": ["Uitstel aanvragen", "Betalingsregeling aanvragen", "Ik weet het niet"]})
+        add({"id": "reden", "label": "Korte toelichting (waarom nu lastig betalen?)", "type": "textarea", "required": False, "minLength": 15})
+
+    if "bezwaar" in qlow or str(values.get("motivering") or "").strip():
+        add({"id": "route", "label": "Hoe wilt u het liefst indienen?", "type": "select", "required": False, "options": ["Online", "Per post", "Weet ik niet"]})
+
+    return out[:14]
+
 async def run_genui_search_flow(sid: str, inputs: Json) -> None:
     surface_id = "genui_search"
     query = str(inputs.get("query", "")).strip()
@@ -655,400 +644,162 @@ async def run_genui_search_flow(sid: str, inputs: Json) -> None:
         await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (GenUI fallback)", step="done")
 
 
-# -----------------------
-# Flow 4: GenUI Wizard (Decision Tree) — deterministic A2A (next_node) + MCP citations
-# -----------------------
-
-def _tree_default_state() -> Json:
-    return {"node": "root", "path": []}
-
-
-async def _set_tree_state(sid: str, surface_id: str, state: Json) -> None:
-    await hub.push_update_and_apply(sid, surface_id, [{"op": "replace", "path": "/tree", "value": state}])
-
-
-def _tree_query_from_state(state: Json, choice: str) -> str:
-    # Derive a deterministic query for bd_search based on the path + current choice.
-    parts: List[str] = []
-    for p in (state.get("path") or []):
-        if p:
-            parts.append(str(p))
-    if choice:
-        parts.append(choice)
-
-    q = " ".join(parts).strip()
-    q_low = q.lower()
-
-    # Light boosts for better hits in the curated dataset
-    if "bezwaar" in q_low:
-        q = f"{q} bezwaar indienen termijn"
-    if "betal" in q_low or "uitstel" in q_low:
-        q = f"{q} uitstel betalingsregeling"
-    if "toeslag" in q_low:
-        q = f"{q} toeslagen wijzigen terugbetalen"
-    if not q:
-        q = "bezwaar betalen toeslagen"
-
-    return q
-
-
-async def run_genui_tree_start_flow(sid: str, inputs: Json) -> None:
+async def run_genui_tree_start_flow(sid: str) -> None:
     surface_id = "genui_tree"
+    _GENUI_TREE_STATE[sid] = {"node": "root", "path": []}
 
-    # Do not depend on Gemini; start always deterministic.
-    await _send_open_surface(sid, surface_id, "Generatieve UI — Wizard", _empty_surface_model("A2UI: Wizard gestart."))
+    await _send_open_surface(sid, surface_id, "Generatieve UI — Wizard", _empty_surface_model("A2UI: Nieuwe wizard gestart…"))
     await _sleep_tick()
-
-    state = _tree_default_state()
-    await _set_tree_state(sid, surface_id, state)
 
     await _set_status(
         sid,
         surface_id,
-        loading=True,
-        message="A2UI: Wizard laden…",
-        step="tree_start",
+        loading=False,
+        message="A2UI: Kies een onderwerp om te beginnen.",
+        step="start",
         source="fallback",
         sourceReason="deterministic_tree",
     )
-    await _set_results(sid, surface_id, [])
-    await _sleep_tick()
-
-    blocks: List[Json] = [
-        {
-            "kind": "callout",
-            "title": "Wizard (demo)",
-            "body": "Beantwoord een paar korte vragen. Op basis daarvan tonen we relevante info en vervolgstappen (demo, geen besluit).",
-        },
-        {
-            "kind": "decision",
-            "title": "Stap 1",
-            "question": "Waar gaat uw vraag over?",
-            "options": ["Bezwaar maken", "Betalen", "Toeslagen", "Contact", "Anders"],
-        },
-    ]
-
-    await _set_results(sid, surface_id, blocks)
-    await _set_status(sid, surface_id, loading=False, message="A2UI: Kies een optie om door te gaan.", step="waiting")
+    await _set_results(sid, surface_id, _tree_start_blocks())
 
 
 async def run_genui_tree_choose_flow(sid: str, inputs: Json) -> None:
     surface_id = "genui_tree"
-    choice = _safe_str(inputs.get("option") or inputs.get("choice") or inputs.get("value") or "", max_len=120)
-    if not choice:
+    option = str(inputs.get("option") or "").strip()
+    if not option:
         return
 
-    s = await hub.get(sid)
-    if not s:
-        return
-    model = s.get_model(surface_id) if s else {}
-    state = model.get("tree") if isinstance(model, dict) else None
-    if not isinstance(state, dict):
-        state = _tree_default_state()
-
-    # Update the visible path immediately (UX): show the chosen option in the path while we work.
-    try:
-        path_in = state.get("path") or []
-        path = [str(x) for x in path_in if str(x).strip()]
-        if choice and (not path or path[-1] != choice):
-            path = (path + [choice])[:12]
-        preview_state = {**state, "path": path}
-        await _set_tree_state(sid, surface_id, preview_state)
-    except Exception:
-        # Never break the demo on UI-only enhancements.
-        pass
-
-    await _set_status(sid, surface_id, loading=True, message=f"A2UI: Keuze ontvangen: {choice}", step="tree_choose")
+    state = _GENUI_TREE_STATE.get(sid) or {"node": "root", "path": []}
+    await _set_status(
+        sid,
+        surface_id,
+        loading=True,
+        message="A2UI: Volgende stap bepalen (A2A)…",
+        step="next_node",
+        source="fallback",
+        sourceReason="deterministic_tree",
+    )
     await _sleep_tick()
 
-    # 1) MCP citations for this step (deterministic)
-    query = _tree_query_from_state(state, choice)
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Bronnen ophalen (MCP)…", step="bd_search")
+    try:
+        data = await _a2a_call_with_trace(
+            sid,
+            surface_id,
+            a2a_genui,
+            "next_node",
+            {"state": state, "choice": option},
+            step="next_node",
+        )
+        if not isinstance(data, dict):
+            data = {}
+        blocks_raw = data.get("blocks") or []
+        if isinstance(blocks_raw, dict):
+            blocks_raw = [blocks_raw]
+        blocks = _sanitize_genui_blocks(blocks_raw)
+
+        new_state = data.get("tree") if isinstance(data.get("tree"), dict) else None
+        if new_state:
+            _GENUI_TREE_STATE[sid] = new_state
+
+        ui_source = _safe_str(data.get("ui_source", "fallback"), max_len=40).lower() or "fallback"
+        ui_reason = _safe_str(data.get("ui_source_reason", "deterministic_tree"), max_len=80) or "deterministic_tree"
+
+        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (Wizard)", step="done", source=ui_source, sourceReason=ui_reason)
+        await _set_results(sid, surface_id, blocks)
+    except Exception:
+        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (Wizard fallback)", step="done", source="fallback", sourceReason="a2a_down_or_error")
+        await _set_results(sid, surface_id, _tree_start_blocks())
+
+
+async def run_genui_form_generate_flow(sid: str, inputs: Json) -> None:
+    surface_id = "genui_form"
+    query = str(inputs.get("query") or "").strip()
+    if not query:
+        return
+
+    await _send_open_surface(sid, surface_id, "Generatieve UI — Formulier", _empty_surface_model("A2UI: Formulier genereren…"))
+    await _sleep_tick()
+
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Bronnen ophalen (MCP)…", step="bd_search", source="", sourceReason="")
+    await _set_results(sid, surface_id, [])
     await _sleep_tick()
 
     search_resp = await _mcp_call_with_trace(sid, surface_id, "bd_search", {"query": query, "k": 5}, step="bd_search")
     citations = search_resp.get("items", []) if isinstance(search_resp, dict) else []
     citations_block: Json = {"kind": "citations", "title": "Bronnen (MCP)", "items": citations}
 
-    # Progressive: show citations first
-    await _set_results(sid, surface_id, [citations_block] if citations else [])
+    await _set_results(sid, surface_id, [citations_block])
     await _sleep_tick()
 
-    # 2) A2A decision step (deterministic fallback inside the GenUI agent)
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Volgende stap bepalen (A2A)…", step="next_node")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Formulier opbouwen (A2A)…", step="compose_form")
     await _sleep_tick()
+
+    ui_source = "fallback"
+    ui_reason = "deterministic_form"
+    blocks: List[Json] = []
+    form_block: Optional[Json] = None
 
     try:
-        ui_raw = await _a2a_call_with_trace(
-            sid,
-            surface_id,
-            a2a_genui,
-            "next_node",
-            {"state": state, "choice": choice, "citations": citations},
-            step="next_node",
-        )
-
-        ui_data = ui_raw.get("data") if isinstance(ui_raw, dict) and isinstance(ui_raw.get("data"), dict) else ui_raw
-        if not isinstance(ui_data, dict):
-            ui_data = {}
-
-        blocks_raw = ui_data.get("blocks", [])
-        blocks = _sanitize_genui_blocks(blocks_raw)
-
-        # Prefer citations from MCP only
-        blocks = [b for b in blocks if b.get("kind") != "citations"]
-
-        ui_source = _safe_str(ui_data.get("ui_source", "fallback"), max_len=40).lower()
-        if ui_source not in ("gemini", "fallback"):
-            ui_source = "fallback"
-        ui_reason = _safe_str(ui_data.get("ui_source_reason", "deterministic_tree"), max_len=80)
-
-        new_state = ui_data.get("tree")
-        if isinstance(new_state, dict):
-            await _set_tree_state(sid, surface_id, new_state)
-
-        await _set_status(sid, surface_id, source=ui_source, sourceReason=ui_reason)
-
-        merged: List[Json] = []
-        if citations:
-            merged.append(citations_block)
-        merged.extend(blocks)
-
-        if not blocks:
-            merged.append({"kind": "notice", "title": "Wizard", "body": "Geen blokken ontvangen; alleen bronnen getoond (demo)."})
-        await _set_results(sid, surface_id, merged)
-
-        has_decision = any(b.get("kind") == "decision" for b in merged)
-        await _set_status(
-            sid,
-            surface_id,
-            loading=False,
-            message="A2UI: Kies een optie om door te gaan." if has_decision else "A2UI: Klaar. (wizard, demo)",
-            step="waiting" if has_decision else "done",
-        )
-    except Exception:
-        await _set_status(sid, surface_id, source="fallback", sourceReason="a2a_down_or_error")
-
-        merged: List[Json] = []
-        if citations:
-            merged.append(citations_block)
-        merged.append({"kind": "notice", "title": "Wizard", "body": "A2A genui-agent niet bereikbaar; wizard valt terug op start."})
-        merged.append(
-            {
-                "kind": "decision",
-                "title": "Stap 1",
-                "question": "Waar gaat uw vraag over?",
-                "options": ["Bezwaar maken", "Betalen", "Toeslagen", "Contact", "Anders"],
-            }
-        )
-        await _set_results(sid, surface_id, merged)
-        await _set_status(sid, surface_id, loading=False, message="A2UI: Kies een optie om door te gaan.", step="waiting")
-
-# -----------------------
-# Flow 5: GenUI Form (Form-on-the-fly) — deterministic A2A (compose_form/explain_form) + MCP validate_form
-# -----------------------
-
-def _form_default_state() -> Json:
-    return {"query": "", "citations": [], "form": None}
-
-
-async def _set_form_state(sid: str, surface_id: str, state: Json) -> None:
-    await hub.push_update_and_apply(sid, surface_id, [{"op": "replace", "path": "/form", "value": state}])
-
-
-def _extract_first_form_block(blocks: List[Json]) -> Optional[Json]:
-    for b in blocks:
-        if isinstance(b, dict) and b.get("kind") == "form":
-            return b
-    return None
-
-
-def _boost_query(query: str) -> str:
-    """Deterministische query-expansie (veilig), zodat bd_search vaker relevante hits heeft."""
-    q = (query or "").strip()
-    if not q:
-        return ""
-
-    low = q.lower()
-    expansions: list[str] = []
-
-    if any(k in low for k in ["bezwaar", "bezwaarschrift", "beroep"]):
-        expansions += ["bezwaar indienen", "termijn", "uitspraak op bezwaar"]
-
-    if any(k in low for k in ["uitstel", "betalingsregeling", "betaal", "betalen", "incasso"]):
-        expansions += ["uitstel van betaling", "betalingsregeling", "betaaltermijn"]
-
-    if any(k in low for k in ["toeslag", "toeslagen"]):
-        expansions += ["huurtoeslag", "zorgtoeslag", "kinderopvangtoeslag", "kindgebonden budget", "toeslagpartner"]
-
-    # Alleen extra termen toevoegen als ze nog niet in de query staan
-    extras = [e for e in expansions if e.lower() not in low]
-    return q if not extras else (q + " " + " ".join(extras))
-
-async def run_genui_form_generate_flow(sid: str, inputs: Json) -> None:
-    surface_id = "genui_form"
-    query = str(inputs.get("query", "")).strip()
-    if not query:
-        return
-
-    await _send_open_surface(sid, surface_id, "Generatieve UI — Formulier", _empty_surface_model("A2UI: Nieuwe run gestart…"))
-    await _sleep_tick()
-
-    await _set_form_state(sid, surface_id, _form_default_state())
-
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Formulier genereren…", step="start", source="", sourceReason="")
-    await _set_results(sid, surface_id, [])
-    await _sleep_tick()
-
-    # 1) MCP citations
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Bronnen ophalen (MCP)…", step="bd_search")
-    await _sleep_tick()
-
-    q = _boost_query(query)
-    search_resp = await _mcp_call_with_trace(sid, surface_id, "bd_search", {"query": q, "k": 5}, step="bd_search")
-    citations = search_resp.get("items", []) if isinstance(search_resp, dict) else []
-    citations_block: Json = {"kind": "citations", "title": "Bronnen (MCP)", "items": citations}
-
-    # 2) A2A compose_form (deterministic)
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Formulier opstellen (A2A)…", step="compose_form")
-    await _sleep_tick()
-
-    try:
-        resp = await _a2a_call_with_trace(sid, surface_id, a2a_genui_url, "compose_form", {"query": query, "citations": citations}, step="compose_form")
-        data = _a2a_data_dict(resp)
-
+        data = await _a2a_call_with_trace(sid, surface_id, a2a_genui, "compose_form", {"query": query, "citations": citations}, step="compose_form")
+        if not isinstance(data, dict):
+            data = {}
         blocks_raw = data.get("blocks") or []
         if isinstance(blocks_raw, dict):
             blocks_raw = [blocks_raw]
-
-        ui_source = str(data.get("ui_source") or "fallback")
-        ui_reason = str(data.get("ui_source_reason") or "deterministic_form")
-
         blocks = _sanitize_genui_blocks(blocks_raw)
+        blocks = [b for b in blocks if b.get("kind") != "citations"]
 
-        merged: List[Json] = []
-        if citations:
-            merged.append(citations_block)
-        merged.extend(blocks)
-
-        form_block = _extract_first_form_block(blocks)
-        await _set_form_state(sid, surface_id, {"query": query, "citations": citations, "form": form_block})
-
-        await _set_status(sid, surface_id, source=str(ui_source), sourceReason=str(ui_reason))
-        await _set_results(sid, surface_id, _sanitize_genui_blocks(merged))
-        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. Vul het formulier in en klik op Verstuur.", step="waiting")
+        ui_source = _safe_str(data.get("ui_source", "fallback"), max_len=40).lower() or "fallback"
+        ui_reason = _safe_str(data.get("ui_source_reason", "deterministic_form"), max_len=80) or "deterministic_form"
     except Exception:
-        await _set_status(sid, surface_id, source="fallback", sourceReason="a2a_down_or_error")
+        blocks = [{"kind": "notice", "title": "Formulier", "body": "GenUI-agent niet bereikbaar; fallback actief."}]
+        ui_source = "fallback"
+        ui_reason = "a2a_down_or_error"
 
-        form_block = {
-            "kind": "form",
-            "title": "Formulier (demo)",
-            "formId": "contact_v1",
-            "description": "Vul enkele gegevens in. Dit is een deterministische fallback.",
-            "submitLabel": "Verstuur",
-            "fields": [
-                {"id": "email", "label": "E-mailadres", "type": "email", "required": True, "placeholder": "naam@example.nl"},
-                {"id": "toelichting", "label": "Toelichting", "type": "textarea", "required": True, "placeholder": "Beschrijf kort uw vraag."},
-            ],
-        }
+    for b in blocks:
+        if isinstance(b, dict) and b.get("kind") == "form":
+            form_block = b
+            break
 
-        merged: List[Json] = []
-        if citations:
-            merged.append(citations_block)
-        merged.append({"kind": "notice", "title": "Formulier", "body": "A2A genui-agent niet bereikbaar; fallback actief."})
-        merged.append(form_block)
+    _GENUI_FORM_STATE[sid] = {"query": query, "citations": citations, "form": form_block}
 
-        await _set_form_state(sid, surface_id, {"query": query, "citations": citations, "form": form_block})
-        await _set_results(sid, surface_id, _sanitize_genui_blocks(merged))
-        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (Form fallback)", step="waiting")
+    merged: List[Json] = [citations_block]
+    merged.extend(blocks)
 
-
-def _form_extend_fields(schema: List[Json], values: Dict[str, Any], query: str) -> List[Json]:
-    """Deterministische (variant A) field extension op basis van ingevulde waarden.
-    Bewust klein en voorspelbaar: dit is demo-UX (geen echt advies).
-    """
-    out: List[Json] = [f for f in schema if isinstance(f, dict)]
-    ids = {str(f.get("id")) for f in out if isinstance(f, dict) and f.get("id")}
-
-    def add_field(field: Json) -> None:
-        fid = str(field.get("id") or "")
-        if not fid or fid in ids:
-            return
-        out.append(field)
-        ids.add(fid)
-
-    qlow = (query or "").lower()
-
-    kenmerk = str(values.get("kenmerk") or "").strip()
-    if kenmerk and len(kenmerk) >= 6:
-        add_field({"id": "dagtekening", "label": "Dagtekening (op brief/aanslag)", "type": "date", "required": False})
-
-    bedrag_raw = values.get("bedrag")
-    try:
-        bedrag = float(bedrag_raw) if bedrag_raw not in (None, "") else 0.0
-    except Exception:
-        bedrag = 0.0
-
-    if bedrag > 0:
-        add_field({"id": "voorkeur", "label": "Waar gaat uw verzoek over?", "type": "select", "required": False,
-                   "options": ["Uitstel aanvragen", "Betalingsregeling aanvragen", "Ik weet het niet"]})
-        add_field({"id": "reden", "label": "Korte toelichting (waarom nu lastig betalen?)", "type": "textarea", "required": False,
-                   "minLength": 15, "placeholder": "Bijv. tijdelijk minder inkomen of onverwachte kosten (demo)."})
-
-    mot = str(values.get("motivering") or "").strip()
-    vraag = str(values.get("vraag") or "").strip()
-    if ("bezwaar" in qlow) or ("bezwaar" in (vraag.lower() if vraag else "")) or mot:
-        add_field({"id": "route", "label": "Hoe wilt u het liefst indienen?", "type": "select", "required": False,
-                   "options": ["Online", "Per post", "Weet ik niet"]})
-
-    return out[:12]
+    await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (Formulier)", step="done", source=ui_source, sourceReason=ui_reason)
+    await _set_results(sid, surface_id, merged)
 
 
 async def run_genui_form_change_flow(sid: str, inputs: Json) -> None:
-    """Variant A (deterministisch): voeg velden toe op basis van ingevulde waarden.
-    Lichtgewicht: geen MCP/A2A calls, alleen model update.
-    """
     surface_id = "genui_form"
-    form_id = str(inputs.get("formId") or "").strip() or "form"
     values = inputs.get("values") or {}
     if not isinstance(values, dict):
         values = {}
     query = str(inputs.get("query") or "").strip()
 
+    state = _GENUI_FORM_STATE.get(sid) or {}
+    form_block = state.get("form")
+    if not isinstance(form_block, dict):
+        return
+
+    fields = form_block.get("fields") if isinstance(form_block.get("fields"), list) else []
+    fields = [f for f in fields if isinstance(f, dict)]
+
+    extended = _extend_form_fields(fields, values, query or str(state.get("query") or ""))
+    base_ids = [str(f.get("id")) for f in fields]
+    ext_ids = [str(f.get("id")) for f in extended]
+    if base_ids == ext_ids:
+        return
+
+    updated_form = {**form_block, "fields": extended}
+    state["form"] = updated_form
+    state["query"] = query or str(state.get("query") or "")
+    _GENUI_FORM_STATE[sid] = state
+
     s = await hub.get(sid)
     if not s:
         return
     model = s.get_model(surface_id)
-    form_state = model.get("form") if isinstance(model, dict) else None
-    if not isinstance(form_state, dict):
-        return
-
-    form_block = form_state.get("form")
-    if not isinstance(form_block, dict):
-        return
-
-    schema = form_block.get("fields") if isinstance(form_block.get("fields"), list) else []
-    schema = [f for f in (schema or []) if isinstance(f, dict)]
-
-    extended = _form_extend_fields(schema, values, query or str(form_state.get("query") or ""))
-
-    base_ids = [str(f.get("id")) for f in schema if isinstance(f, dict)]
-    ext_ids = [str(f.get("id")) for f in extended if isinstance(f, dict)]
-    if ext_ids == base_ids:
-        return
-
-    updated_form = {**form_block, "fields": extended, "formId": form_id}
-
-    await _set_form_state(
-        sid,
-        surface_id,
-        {
-            "query": query or str(form_state.get("query") or ""),
-            "citations": form_state.get("citations") or [],
-            "form": updated_form,
-        },
-    )
-
     results = model.get("results") if isinstance(model, dict) else None
     if not isinstance(results, list):
         return
@@ -1061,98 +812,67 @@ async def run_genui_form_change_flow(sid: str, inputs: Json) -> None:
             replaced = True
         else:
             new_results.append(b)
-
     if not replaced:
         new_results.append(updated_form)
 
+    await _set_status(sid, surface_id, loading=False, message="A2UI: Formulier aangevuld.", step="change", source="fallback", sourceReason="deterministic_form_extend")
     await _set_results(sid, surface_id, _sanitize_genui_blocks(new_results))
 
 
 async def run_genui_form_submit_flow(sid: str, inputs: Json) -> None:
     surface_id = "genui_form"
-    form_id = str(inputs.get("formId") or "").strip() or "form"
     values = inputs.get("values") or {}
     if not isinstance(values, dict):
         values = {}
-    query = str(inputs.get("query") or "").strip()
 
-    ui_source = "fallback"
-    ui_reason = "deterministic_form_explain"
+    state = _GENUI_FORM_STATE.get(sid) or {}
+    query = str(state.get("query") or inputs.get("query") or "").strip()
+    form_block = state.get("form")
+    fields = form_block.get("fields") if isinstance(form_block, dict) and isinstance(form_block.get("fields"), list) else []
+    fields = [f for f in fields if isinstance(f, dict)]
 
-    s = await hub.get(sid)
-    if not s:
-        return
-    model = s.get_model(surface_id)
-    form_state = model.get("form") if isinstance(model, dict) else None
-    if not isinstance(form_state, dict):
-        form_state = _form_default_state()
-
-    citations = form_state.get("citations") or []
-    form_block = form_state.get("form")
-    if not isinstance(form_block, dict):
-        form_block = None
-
-    schema = []
-    if form_block and isinstance(form_block.get("fields"), list):
-        schema = form_block.get("fields") or []
-
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Validatie uitvoeren (MCP)…", step="validate_form", source=ui_source, sourceReason="deterministic_form")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Formulier controleren…", step="validate", source="fallback", sourceReason="deterministic_form")
     await _sleep_tick()
 
-    validate_resp = await _mcp_call_with_trace(sid, surface_id, "validate_form", {"schema": schema, "values": values}, step="validate_form")
-    ok = bool(validate_resp.get("ok")) if isinstance(validate_resp, dict) else False
-    errors = validate_resp.get("errors") if isinstance(validate_resp, dict) else []
-    if not isinstance(errors, list):
-        errors = []
+    ok, errors = _validate_form_values(fields, values)
 
-    if ok:
-        notice = {"kind": "notice", "title": "Ingediend (demo)", "body": "Uw gegevens zijn ontvangen (demo). Hieronder ziet u de vervolgstappen."}
-    else:
-        lines = ["Controleer uw invoer:"]
-        for e in errors[:8]:
-            if isinstance(e, dict):
-                fld = _safe_str(e.get("field") or "", max_len=40)
-                msg = _safe_str(e.get("message") or "Ongeldige waarde", max_len=120)
-                lines.append(f"- {fld}: {msg}")
-        notice = {"kind": "notice", "title": "Controleer invoer", "body": "\n".join(lines)}
-
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Uitleg maken (A2A)…", step="explain_form", source=ui_source, sourceReason="deterministic_form")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Vervolgstappen opstellen (A2A)…", step="explain_form", source="fallback", sourceReason="deterministic_form_explain")
     await _sleep_tick()
 
     explain_blocks: List[Json] = []
     try:
-        resp = await _a2a_call_with_trace(sid, surface_id, a2a_genui, "explain_form", {"query": query, "ok": ok, "errors": errors, "values": values, "formId": form_id}, step="explain_form")
-        data = _a2a_data_dict(resp)
-        ui_source = str(data.get('ui_source') or ui_source)
-        ui_reason = str(data.get('ui_source_reason') or ui_reason)
-        blocks_raw = data.get('blocks') or []
+        data = await _a2a_call_with_trace(sid, surface_id, a2a_genui, "explain_form", {"query": query, "ok": ok, "errors": errors}, step="explain_form")
+        if not isinstance(data, dict):
+            data = {}
+        blocks_raw = data.get("blocks") or []
         if isinstance(blocks_raw, dict):
             blocks_raw = [blocks_raw]
         explain_blocks = _sanitize_genui_blocks(blocks_raw)
     except Exception:
-        explain_blocks = [
-            {"kind": "callout", "title": "Vervolgstap (demo)", "body": "Ga verder met het verzamelen van relevante stukken en controleer de termijnen. (Deterministische fallback.)"}
-        ]
+        if ok:
+            explain_blocks = [
+                {"kind": "notice", "title": "Ingediend (demo)", "body": "Uw gegevens zijn ontvangen (demo). Hieronder ziet u de vervolgstappen."},
+                {"kind": "callout", "title": "Vervolgstappen (demo)", "body": "1) Bewaar uw kenmerk/nummer.\n2) Verzamel relevante documenten.\n3) Let op termijnen."},
+                {"kind": "next_questions", "title": "Vervolgvraag", "items": ["Hoe maak ik bezwaar?", "Hoe vraag ik uitstel aan?", "Wat heb ik nodig?"]},
+            ]
+        else:
+            explain_blocks = [{"kind": "notice", "title": "Niet verstuurd", "body": "Controleer de velden en probeer opnieuw."}]
 
-
+    s = await hub.get(sid)
+    model = s.get_model(surface_id) if s else None
+    results = model.get("results") if isinstance(model, dict) else []
+    if not isinstance(results, list):
+        results = []
 
     merged: List[Json] = []
-    if citations:
-        merged.append({"kind": "citations", "title": "Bronnen (MCP)", "items": citations})
-    merged.append(notice)
-    if form_block:
-        merged.append(form_block)
+    for b in results:
+        if isinstance(b, dict) and b.get("kind") == "citations":
+            merged.append(b)
+            break
+    if isinstance(state.get("form"), dict):
+        merged.append(state["form"])
     merged.extend(explain_blocks)
 
-    await _set_form_state(sid, surface_id, {"query": query or form_state.get("query") or "", "citations": citations, "form": form_block})
     await _set_results(sid, surface_id, _sanitize_genui_blocks(merged))
+    await _set_status(sid, surface_id, loading=False, message=("A2UI: Klaar. (Formulier ingediend)" if ok else "A2UI: Klaar. Corrigeer de velden en verstuur opnieuw."), step="done", source="fallback", sourceReason="deterministic_form_explain")
 
-    await _set_status(
-        sid,
-        surface_id,
-        loading=False,
-        message=("A2UI: Klaar. (Formulier ingediend)" if ok else "A2UI: Klaar. Corrigeer de velden en verstuur opnieuw."),
-        step="done",
-        source=ui_source,
-        sourceReason=ui_reason,
-    )
