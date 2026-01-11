@@ -61,7 +61,7 @@ async def agent_card():
         "name": "genui-agent",
         "description": "Composes UI blocks (A2UI-friendly) from search results (Gemini or fallback).",
         "url": "http://localhost:8030/",
-        "capabilities": ["compose_ui", "next_node", "compose_form", "explain_form"],
+        "capabilities": ["compose_ui", "next_node", "compose_form", "explain_form", "extend_form"],
         "protocol": "a2a-jsonrpc",
         "version": "0.1.6",
     }
@@ -100,6 +100,110 @@ def _fallback_blocks(query: str, citations: List[Json]) -> List[Json]:
 # Decision Tree Wizard (deterministic, no Gemini dependency)
 # -----------------------
 
+def _fallback_form_blocks(query: str, citations: List[Json]) -> List[Json]:
+    """Deterministische form-generator (demo)."""
+    q = (query or "").strip()
+    low = q.lower()
+
+    scenario = "algemeen"
+    if any(k in low for k in ["uitstel", "betalingsregeling", "betaal", "betalen", "incasso"]):
+        scenario = "betaling"
+    elif any(k in low for k in ["bezwaar", "bezwaarschrift", "beroep"]):
+        scenario = "bezwaar"
+    elif "toeslag" in low or "toeslagen" in low:
+        scenario = "toeslagen"
+
+    fields: List[Json] = [
+        {"id": "email", "label": "E-mailadres", "type": "email", "required": True, "placeholder": "naam@example.nl"},
+        {"id": "vraag", "label": "Uw vraag", "type": "text", "required": True, "minLength": 10, "placeholder": "Omschrijf kort uw situatie of vraag (demo)."},
+    ]
+
+    if scenario == "betaling":
+        fields += [
+            {"id": "kenmerk", "label": "Kenmerk / aanslagnummer", "type": "text", "required": True, "minLength": 6, "placeholder": "Bijv. 00.00.000.000 (placeholder)."},
+            {"id": "bedrag", "label": "Bedrag (EUR)", "type": "number", "required": False, "placeholder": "Bijv. 750"},
+        ]
+    elif scenario == "bezwaar":
+        fields += [
+            {"id": "kenmerk", "label": "Kenmerk / aanslagnummer", "type": "text", "required": True, "minLength": 6, "placeholder": "Bijv. 00.00.000.000 (placeholder)."},
+            {"id": "motivering", "label": "Kern van uw bezwaar", "type": "textarea", "required": True, "minLength": 20, "placeholder": "Waarom bent u het niet eens? (demo)"},
+        ]
+    elif scenario == "toeslagen":
+        fields += [
+            {"id": "regeling", "label": "Regeling", "type": "text", "required": True, "placeholder": "Bijv. huurtoeslag / zorgtoeslag (demo)"},
+            {"id": "jaar", "label": "Jaar", "type": "number", "required": False, "placeholder": "Bijv. 2025"},
+        ]
+
+    intro = {"kind": "callout", "title": "Formulier (demo)", "body": "Vul de velden in en klik op Verstuur. Geen echte verzending; gebruik demo/placeholder."}
+    form_block = {"kind": "form", "title": "Gegevens", "fields": fields, "submitLabel": "Verstuur"}
+    return [intro, form_block]
+
+
+def _fallback_form_explain(query: str, ok: bool, errors: List[Json]) -> List[Json]:
+    """Deterministische vervolgstappen na validatie (demo)."""
+    if not ok:
+        lines: List[str] = []
+        for e in errors or []:
+            if isinstance(e, dict):
+                msg = str(e.get("message") or "").strip()
+                if msg:
+                    lines.append(f"- {msg}")
+        body = "Controleer de invoer:\n" + ("\n".join(lines) if lines else "- Onbekende validatiefout.")
+        return [
+            {"kind": "notice", "title": "Niet verstuurd", "body": body},
+            {"kind": "next_questions", "title": "Vervolgvraag", "items": [
+                "Welke gegevens zijn verplicht?",
+                "Kan ik ook uitstel of een betalingsregeling aanvragen?",
+                "Wat is het verschil tussen bezwaar en een klacht?"
+            ]},
+        ]
+
+    return [
+        {"kind": "notice", "title": "Ingediend (demo)", "body": "Uw gegevens zijn ontvangen (demo). Hieronder ziet u de vervolgstappen."},
+        {"kind": "callout", "title": "Vervolgstappen (demo)", "body": "1) Bewaar het kenmerk/aanslagnummer (placeholder).\n2) Verzamel relevante documenten.\n3) Let op termijnen en berichten."},
+        {"kind": "next_questions", "title": "Vervolgvraag", "items": [
+            "Wat gebeurt er na het indienen?",
+            "Welke documenten zijn vaak relevant?",
+            "Kan ik ook online indienen?"
+        ]},
+    ]
+
+
+def _fallback_form_extend_fields(query: str, values: dict) -> List[Json]:
+    """Deterministische suggesties voor extra velden (Variant B agent)."""
+    qlow = (query or "").lower()
+    extra: List[Json] = []
+
+    def add(field: Json) -> None:
+        fid = str(field.get("id") or "")
+        if not fid:
+            return
+        if any(isinstance(x, dict) and str(x.get("id") or "") == fid for x in extra):
+            return
+        extra.append(field)
+
+    kenmerk = str(values.get("kenmerk") or "").strip()
+    if kenmerk and len(kenmerk) >= 6:
+        add({"id": "dagtekening", "label": "Dagtekening (op brief/aanslag)", "type": "date", "required": False})
+
+    bedrag_raw = values.get("bedrag")
+    try:
+        bedrag = float(bedrag_raw) if bedrag_raw not in (None, "") else 0.0
+    except Exception:
+        bedrag = 0.0
+
+    if bedrag > 0:
+        add({"id": "voorkeur", "label": "Waar gaat uw verzoek over?", "type": "select", "required": False, "options": ["Uitstel aanvragen", "Betalingsregeling aanvragen", "Ik weet het niet"]})
+        add({"id": "reden", "label": "Korte toelichting (waarom nu lastig betalen?)", "type": "textarea", "required": False, "minLength": 15, "placeholder": "Bijv. tijdelijk minder inkomen of onverwachte kosten (demo)."})
+
+    motivering = str(values.get("motivering") or "").strip()
+    vraag = str(values.get("vraag") or "").strip()
+    if ("bezwaar" in qlow) or ("bezwaar" in (vraag.lower() if vraag else "")) or motivering:
+        add({"id": "route", "label": "Hoe wilt u het liefst indienen?", "type": "select", "required": False, "options": ["Online", "Per post", "Weet ik niet"]})
+
+    return extra[:6]
+
+
 def _tree_decision(title: str, question: str, options: List[str]) -> Json:
     return {"kind": "decision", "title": title, "question": question, "options": options}
 
@@ -137,71 +241,6 @@ def _tree_leaf_blocks(topic: str, path: List[str]) -> List[Json]:
         {"kind": "notice", "title": "Let op", "body": "Demo-informatie. Geen persoonsgegevens. Raadpleeg officiële pagina’s voor actuele details."},
     ]
 
-
-
-
-def _fallback_form_blocks(query: str, citations: List[Json]) -> List[Json]:
-    """Deterministische form-generator (demo)."""
-    q = (query or "").strip()
-    low = q.lower()
-
-    scenario = "algemeen"
-    if any(k in low for k in ["uitstel", "betalingsregeling", "betaal", "betalen"]):
-        scenario = "betaling"
-    elif any(k in low for k in ["bezwaar", "bezwaarschrift", "beroep"]):
-        scenario = "bezwaar"
-    elif "toeslag" in low or "toeslagen" in low:
-        scenario = "toeslagen"
-
-    fields: List[Json] = [
-        {"id": "email", "label": "E-mailadres", "type": "email", "required": True, "placeholder": "naam@example.nl"},
-        {"id": "vraag", "label": "Uw vraag", "type": "text", "required": True, "minLength": 10, "placeholder": "Omschrijf kort uw situatie (demo)."},
-    ]
-
-    if scenario in ("betaling", "bezwaar"):
-        fields.append({"id": "kenmerk", "label": "Kenmerk / aanslagnummer", "type": "text", "required": True, "minLength": 6, "placeholder": "Bijv. 00.00.000.000 (placeholder)."})
-
-    if scenario == "betaling":
-        fields.append({"id": "bedrag", "label": "Bedrag (EUR)", "type": "number", "required": False, "placeholder": "Bijv. 750"})
-    if scenario == "bezwaar":
-        fields.append({"id": "motivering", "label": "Kern van uw bezwaar", "type": "textarea", "required": True, "minLength": 20, "placeholder": "Waarom bent u het niet eens? (demo)"})
-    if scenario == "toeslagen":
-        fields.append({"id": "regeling", "label": "Regeling", "type": "text", "required": True, "placeholder": "Bijv. huurtoeslag / zorgtoeslag (demo)"})
-        fields.append({"id": "jaar", "label": "Jaar", "type": "number", "required": False, "placeholder": "Bijv. 2025"})
-
-    return [
-        {
-            "kind": "callout",
-            "title": "Formulier (demo)",
-            "body": "Vul de velden in en klik op Verstuur. Geen echte verzending; gebruik demo/placeholder.",
-        },
-        {
-            "kind": "form",
-            "title": "Gegevens",
-            "fields": fields,
-            "submitLabel": "Verstuur",
-        },
-    ]
-
-
-def _fallback_form_explain(query: str, ok: bool, errors: List[Json]) -> List[Json]:
-    """Deterministische vervolgstappen na validatie (demo)."""
-    if not ok:
-        lines: List[str] = []
-        for e in errors or []:
-            if isinstance(e, dict) and e.get("message"):
-                lines.append(f"- {e.get('message')}")
-        body = "Controleer de invoer:\n" + ("\n".join(lines) if lines else "- Onbekende validatiefout.")
-        return [
-            {"kind": "notice", "title": "Niet verstuurd", "body": body},
-            {"kind": "next_questions", "title": "Probeer ook", "items": ["Welke gegevens zijn verplicht?", "Kan ik uitstel of een betalingsregeling aanvragen?", "Wat is het verschil tussen bezwaar en een klacht?"]},
-        ]
-
-    return [
-        {"kind": "notice", "title": "Ingediend (demo)", "body": "Uw gegevens zijn ontvangen (demo). Hieronder ziet u de vervolgstappen."},
-        {"kind": "callout", "title": "Vervolgstappen (demo)", "body": "1) Bewaar het kenmerk/nummer.\n2) Verzamel relevante documenten.\n3) Let op termijnen."},
-        {"kind": "next_questions", "title": "Vervolgvraag", "items": ["Hoe maak ik bezwaar?", "Hoe vraag ik uitstel aan?", "Welke documenten zijn relevant?"]},
-    ]
 
 def _tree_next_node(state: Json, choice: str) -> Tuple[Json, List[Json]]:
     node = str(state.get("node") or "root")
@@ -529,7 +568,7 @@ async def jsonrpc(payload: Json = Body(...)):
 
     params = payload.get("params") or {}
     capability = params.get("capability")
-    if capability not in ("compose_ui", "next_node", "compose_form", "explain_form"):
+    if capability not in ("compose_ui", "next_node", "compose_form", "explain_form", "extend_form"):
         return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "Unknown capability"}}
 
     message = (params.get("message") or {})
@@ -558,6 +597,16 @@ async def jsonrpc(payload: Json = Body(...)):
         result = {"blocks": blocks, "ui_source": "fallback", "ui_source_reason": "deterministic_form_explain"}
         log.info("capability=explain_form ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
         return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
+
+if capability == "extend_form":
+    values = data.get("values") or {}
+    if not isinstance(values, dict):
+        values = {}
+    extra_fields = _fallback_form_extend_fields(query, values)
+    result = {"extra_fields": extra_fields, "ui_source": "fallback", "ui_source_reason": "deterministic_form_extend"}
+    log.info("capability=extend_form ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
+    return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
+
 
 
     if capability == "next_node":
