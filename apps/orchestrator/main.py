@@ -339,6 +339,7 @@ async def client_event(payload: Json = Body(...)):
             await _send_open_surface(sid, "genui_search", "Generatieve UI — Zoeken", _empty_surface_model("A2UI: Stel een vraag en klik op Zoek."))
         elif target == "genui_tree":
             await _send_open_surface(sid, "genui_tree", "Generatieve UI — Wizard", _empty_surface_model("A2UI: Klik op Opnieuw starten."))
+            asyncio.create_task(run_genui_tree_start_flow(sid))
         elif target == "genui_form":
             await _send_open_surface(sid, "genui_form", "Generatieve UI — Formulier", _empty_surface_model("A2UI: Typ een vraag en klik op Genereer formulier."))
         else:
@@ -370,11 +371,26 @@ async def client_event(payload: Json = Body(...)):
         asyncio.create_task(run_genui_form_generate_flow(sid, data))
         return {"ok": True}
 
+    # Backward compatible aliases (older UI builds)
+    if name == "genui/form_generate":
+        asyncio.create_task(run_genui_form_generate_flow(sid, data))
+        return {"ok": True}
+
     if name == "genui_form/change":
         asyncio.create_task(run_genui_form_change_flow(sid, data))
         return {"ok": True}
 
+    # Backward compatible aliases (older UI builds)
+    if name == "genui/form_change":
+        asyncio.create_task(run_genui_form_change_flow(sid, data))
+        return {"ok": True}
+
     if name == "genui_form/submit":
+        asyncio.create_task(run_genui_form_submit_flow(sid, data))
+        return {"ok": True}
+
+    # Backward compatible aliases (older UI builds)
+    if name == "genui/form_submit":
         asyncio.create_task(run_genui_form_submit_flow(sid, data))
         return {"ok": True}
 
@@ -665,7 +681,7 @@ async def run_genui_tree_start_flow(sid: str) -> None:
 
 async def run_genui_tree_choose_flow(sid: str, inputs: Json) -> None:
     surface_id = "genui_tree"
-    option = str(inputs.get("option") or "").strip()
+    option = str(inputs.get("option") or inputs.get("choice") or "").strip()
     if not option:
         return
 

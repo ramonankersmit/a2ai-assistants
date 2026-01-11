@@ -55,6 +55,7 @@ export class BdApp extends LitElement {
     this._pendingGenuiPrefill = '';
     this._formValues = {};
     this._formChangeTimers = {};
+    this._autoStarted = {};
   }
 
   createRenderRoot() { return this; }
@@ -106,13 +107,14 @@ export class BdApp extends LitElement {
     if (lastEntry && lastEntry.message === message && lastEntry.step === stepNorm) return;
 
     const next = [...this.statusHistory, { ts, message, step: stepNorm }];
-    this.statusHistory = next.slice(-6);
+    this.statusHistory = next.slice(-200);
   }
 
   _handleA2UI(msg) {
     if (msg.kind === 'session/created') {
       this.sessionId = msg.sessionId;
       this.statusHistory = [];
+      this._autoStarted = {};
       return;
     }
     if (msg.kind === 'surface/open') {
@@ -127,6 +129,23 @@ export class BdApp extends LitElement {
 
       this.statusHistory = [];
       this._pushStatusHistory(this.model);
+
+
+// Auto-start wizard on first entry so decision buttons are visible immediately.
+if (this.surfaceId === 'genui_tree') {
+  try {
+    const blocks = (getByPointer(this.model, '/results') || []);
+    const hasBlocks = Array.isArray(blocks) && blocks.length;
+    if (!hasBlocks && !this._autoStarted?.genui_tree) {
+      this._autoStarted.genui_tree = true;
+      setTimeout(() => {
+        if (this.surfaceId === 'genui_tree') {
+          this._sendClientEvent('genui_tree', 'genui_tree/start', {});
+        }
+      }, 0);
+    }
+  } catch (e) { /* ignore */ }
+}
 
       this.requestUpdate();
       return;
@@ -949,7 +968,7 @@ _genuiTreeChoose(opt) {
   const loading = !!getByPointer(this.model, '/status/loading');
   if (loading) return;
   const choice = (opt && typeof opt === 'object') ? (opt.value ?? opt.id ?? opt.label) : opt;
-  this._sendClientEvent('genui_tree', 'genui_tree/choose', { choice });
+  this._sendClientEvent('genui_tree', 'genui_tree/choose', { option: choice, choice });
 }
 
 _renderGenuiForm() {
@@ -999,7 +1018,7 @@ _genuiFormGenerate() {
   if (loading) return;
   const query = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
   if (!query) return;
-  this._sendClientEvent('genui_form', 'genui/form_generate', { query });
+  this._sendClientEvent('genui_form', 'genui_form/generate', { query });
 }
 
 _genuiFormFieldChange(formId, fieldId, value) {
@@ -1015,7 +1034,7 @@ _genuiFormFieldChange(formId, fieldId, value) {
     this._formChangeTimers[fid] = setTimeout(() => {
       const query = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
       const vals = (this._formValues && this._formValues[fid]) ? this._formValues[fid] : {};
-      this._sendClientEvent('genui_form', 'genui/form_change', { formId: fid, values: vals, query });
+      this._sendClientEvent('genui_form', 'genui_form/change', { formId: fid, values: vals, query });
     }, 400);
   } catch (e) {
     // never break UI
@@ -1030,7 +1049,7 @@ _genuiFormSubmit(formId) {
   const fid = String(formId || 'form');
   const query = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
   const vals = (this._formValues && this._formValues[fid]) ? this._formValues[fid] : {};
-  this._sendClientEvent('genui_form', 'genui/form_submit', { formId: fid, values: vals, query });
+  this._sendClientEvent('genui_form', 'genui_form/submit', { formId: fid, values: vals, query });
 }
 
 
