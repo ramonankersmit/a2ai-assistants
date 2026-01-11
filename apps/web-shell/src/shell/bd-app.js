@@ -1065,6 +1065,7 @@ _renderGenuiForm() {
   `;
 }
   render() {
+  try {
     return html`
       <div class="shell">
         ${this._renderHeader()}
@@ -1078,7 +1079,28 @@ _renderGenuiForm() {
         </div>
       </div>
     `;
+  } catch (e) {
+    // Never allow a full blank screen in demo mode; show error context.
+    console.error('bd-app render error', e);
+    const msg = (e && (e.stack || e.message)) ? (e.stack || e.message) : String(e);
+    return html`
+      <div class="container" style="padding-top:18px;">
+        <div class="card">
+          <div class="card-body">
+            <div class="section-title" style="margin-top:0;">UI error</div>
+            <div class="small-muted" style="margin-top:6px;">
+              Er ging iets mis tijdens renderen. Kopieer de fout uit de browser console of uit onderstaande stacktrace.
+            </div>
+            <pre class="quote" style="white-space:pre-wrap; margin-top:12px;">${msg}</pre>
+            <div class="small-muted" style="margin-top:12px;">
+              Tip: hard refresh (Ctrl+F5) na vervanging van bd-app.js.
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
   }
+}
 }
 
 customElements.define('bd-app', BdApp);
