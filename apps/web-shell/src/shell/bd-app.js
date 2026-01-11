@@ -2,33 +2,33 @@ import { LitElement, html } from 'lit';
 import { applyPatches, getByPointer } from './jsonpatch.js';
 import { clipboardIconSvg, pencilIconSvg, logoSvg, menuSvg } from './icons.js';
 
-
-
-// Inline icons for GenUI tiles (to match SVG style of the other tiles)
-const genuiSearchIconSvg = html`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <circle cx="11" cy="11" r="7"></circle>
-  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-</svg>`;
-
-const genuiWizardIconSvg = html`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <path d="M4 6h16"></path>
-  <path d="M4 12h10"></path>
-  <path d="M4 18h16"></path>
-  <path d="M18 10l2 2-2 2"></path>
-</svg>`;
-
-const genuiFormIconSvg = html`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-  <path d="M14 2v6h6"></path>
-  <path d="M8 13h8"></path>
-  <path d="M8 17h8"></path>
-  <path d="M8 9h2"></path>
-</svg>`;
-
 const ORCH_BASE = 'http://localhost:10002';
+
+
+// GenUI tile icons (same sizing as other tiles: 128x128 viewBox + class tile-icon)
+const genuiSearchIconSvg = html`
+<svg viewBox="0 0 128 128" class="tile-icon" aria-hidden="true">
+  <circle cx="56" cy="56" r="26" fill="rgba(26,116,198,0.10)" stroke="rgba(26,116,198,0.95)" stroke-width="6"/>
+  <path d="M74 74l26 26" stroke="rgba(26,116,198,0.95)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M44 56h24" stroke="rgba(26,116,198,0.95)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M56 44v24" stroke="rgba(26,116,198,0.95)" stroke-width="6" stroke-linecap="round"/>
+</svg>`;
+
+const genuiWizardIconSvg = html`
+<svg viewBox="0 0 128 128" class="tile-icon" aria-hidden="true">
+  <rect x="26" y="24" width="76" height="84" rx="12" fill="rgba(26,116,198,0.10)" stroke="rgba(26,116,198,0.95)" stroke-width="6"/>
+  <path d="M40 46h48M40 64h36M40 82h48" stroke="rgba(26,116,198,0.95)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M82 60l10 10 18-18" stroke="rgba(26,116,198,0.95)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
+const genuiFormIconSvg = html`
+<svg viewBox="0 0 128 128" class="tile-icon" aria-hidden="true">
+  <path d="M34 20h44l16 16v72a12 12 0 0 1-12 12H34a12 12 0 0 1-12-12V32a12 12 0 0 1 12-12Z"
+    fill="rgba(26,116,198,0.10)" stroke="rgba(26,116,198,0.95)" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M78 20v22h22" stroke="rgba(26,116,198,0.95)" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M40 58h48M40 76h48M40 94h32" stroke="rgba(26,116,198,0.95)" stroke-width="6" stroke-linecap="round"/>
+</svg>`;
+
 
 export class BdApp extends LitElement {
   static properties = {
@@ -52,7 +52,7 @@ export class BdApp extends LitElement {
 
     this.statusHistory = [];
     this.statusCollapsed = false;
-
+    this._pendingGenuiPrefill = '';
     this._formValues = {};
     this._formChangeTimers = {};
   }
@@ -178,65 +178,60 @@ export class BdApp extends LitElement {
     `;
   }
 
-  _renderHome() {
-    return html`
-      <div class="container">
-        <div class="h1">Welkom! Kies een assistent:</div>
-        <div class="grid-2">
-          <div class="card tile">
-            <div class="card-title">Toeslagen Check</div>
-            <div class="tile-icon">${clipboardIconSvg}</div>
-            <div class="card-sub">Controleer voorwaarden en benodigde<br/>documenten voor uw toeslagaanvraag.</div>
-            <div style="padding-bottom:22px;">
-              <button class="btn" @click=${() => this._nav('toeslagen')}>Start</button>
-            </div>
+  
+_renderHome() {
+  return html`
+    <div class="container">
+      <div class="h1">Welkom! Kies een assistent:</div>
+      <div class="grid-2">
+        <div class="card tile">
+          <div class="card-title">Toeslagen Check</div>
+          <div class="tile-icon">${clipboardIconSvg}</div>
+          <div class="card-sub">Controleer voorwaarden en benodigde<br/>documenten voor uw toeslagaanvraag.</div>
+          <div style="padding-bottom:22px;">
+            <button class="btn" @click=${() => this._nav('toeslagen')}>Start</button>
           </div>
+        </div>
 
-          <div class="card tile">
-            <div class="card-title">Bezwaar Assistent</div>
-            <div class="tile-icon">${pencilIconSvg}</div>
-            <div class="card-sub">Verwerk een bezwaarbrief en genereer een<br/>concept reactie.</div>
-            <div style="padding-bottom:22px;">
-              <button class="btn" @click=${() => this._nav('bezwaar')}>Start</button>
-            </div>
+        <div class="card tile">
+          <div class="card-title">Bezwaar Assistent</div>
+          <div class="tile-icon">${pencilIconSvg}</div>
+          <div class="card-sub">Verwerk een bezwaarbrief en genereer een<br/>concept reactie.</div>
+          <div style="padding-bottom:22px;">
+            <button class="btn" @click=${() => this._nav('bezwaar')}>Start</button>
           </div>
+        </div>
 
-          <!-- Idee 1: GenUI Search -->
-          <div class="card tile">
-            <div class="card-title">Generatieve UI — Zoeken</div>
-            <div class="tile-icon">${genuiSearchIconSvg}</div>
-            <div class="card-sub">Zoek (demo) op onderwerpen en laat<br/>de UI-blokken dynamisch verschijnen.</div>
-            <div style="padding-bottom:22px;">
-              <button class="btn" @click=${() => this._nav('genui_search')}>Start</button>
-            </div>
+        <div class="card tile">
+          <div class="card-title">Generatieve UI — Zoeken</div>
+          <div class="tile-icon">${genuiSearchIconSvg}</div>
+          <div class="card-sub">Zoek (demo) op onderwerpen en laat<br/>de UI-blokken dynamisch verschijnen.</div>
+          <div style="padding-bottom:22px;">
+            <button class="btn" @click=${() => this._nav('genui_search')}>Start</button>
           </div>
+        </div>
 
+        <div class="card tile">
+          <div class="card-title">Generatieve UI — Wizard</div>
+          <div class="tile-icon">${genuiWizardIconSvg}</div>
+          <div class="card-sub">Doorloop een korte beslisboom (demo)<br/>met klikbare keuzes en vervolgstappen.</div>
+          <div style="padding-bottom:22px;">
+            <button class="btn" @click=${() => this._nav('genui_tree')}>Start</button>
+          </div>
+        </div>
 
-          <!-- Idee 3: Decision Tree Wizard -->
-          <div class="card tile">
-            <div class="card-title">Generatieve UI — Wizard</div>
-            <div class="tile-icon">${genuiWizardIconSvg}</div>
-            <div class="card-sub">Doorloop een korte beslisboom (demo)<br/>met klikbare keuzes en vervolgstappen.</div>
-            <div style="padding-bottom:22px;">
-              <button class="btn" @click=${() => this._nav('genui_tree')}>Start</button>
-            </div>
-          
-
-<!-- Idee 2: Form-on-the-fly -->
-<div class="card tile">
-  <div class="card-title">Generatieve UI — Formulier</div>
-  <div class="tile-icon">${genuiFormIconSvg}</div>
-  <div class="card-sub">Laat een formulier genereren en valideer<br/>deterministisch (demo).</div>
-  <div style="padding-bottom:22px;">
-    <button class="btn" @click=${() => this._nav('genui_form')}>Start</button>
-  </div>
-</div>
-
-</div>
+        <div class="card tile">
+          <div class="card-title">Generatieve UI — Formulier</div>
+          <div class="tile-icon">${genuiFormIconSvg}</div>
+          <div class="card-sub">Laat een formulier genereren en valideer<br/>deterministisch (demo).</div>
+          <div style="padding-bottom:22px;">
+            <button class="btn" @click=${() => this._nav('genui_form')}>Start</button>
+          </div>
         </div>
       </div>
-    `;
-  }
+    </div>
+  `;
+}
 
   _formatTimestamp(value) {
     if (!value) return '—';
@@ -402,19 +397,7 @@ export class BdApp extends LitElement {
               <div class="status-dot"></div>
               <div><b>Tip:</b> Zorg dat u al uw documenten op tijd aanlevert!</div>
             </div>
-          
-
-<!-- Idee 2: Form-on-the-fly -->
-<div class="card tile">
-  <div class="card-title">Generatieve UI — Formulier</div>
-  <div class="tile-icon">${genuiFormIconSvg}</div>
-  <div class="card-sub">Laat een formulier genereren en valideer<br/>deterministisch (demo).</div>
-  <div style="padding-bottom:22px;">
-    <button class="btn" @click=${() => this._nav('genui_form')}>Start</button>
-  </div>
-</div>
-
-</div>
+          </div>
         </div>
       </div>
     `;
@@ -595,19 +578,7 @@ export class BdApp extends LitElement {
               <div class="status-dot"></div>
               <div>${loading ? 'Drafting response…' : 'Gereed.'}</div>
             </div>
-          
-
-<!-- Idee 2: Form-on-the-fly -->
-<div class="card tile">
-  <div class="card-title">Generatieve UI — Formulier</div>
-  <div class="tile-icon">${genuiFormIconSvg}</div>
-  <div class="card-sub">Laat een formulier genereren en valideer<br/>deterministisch (demo).</div>
-  <div style="padding-bottom:22px;">
-    <button class="btn" @click=${() => this._nav('genui_form')}>Start</button>
-  </div>
-</div>
-
-</div>
+          </div>
         </div>
       </div>
     `;
@@ -627,199 +598,246 @@ export class BdApp extends LitElement {
 
   // --- Idee 1: GenUI Search (UI blocks renderer) ---
 
-  _renderBlocks(blocks) {
-    const arr = Array.isArray(blocks) ? blocks : [];
-    if (!arr.length) {
-      return html`<div class="small-muted">Nog geen output. Stel een vraag en klik op “Zoek”.</div>`;
-    }
+  
 
-    const renderOne = (b) => {
-      if (!b || typeof b !== 'object') return '';
-      const kind = b.kind || '';
-      if (kind === 'callout') {
-        return html`
-          <div class="card" style="margin-top:14px;">
-            <div class="card-body">
-              <div class="section-title" style="margin-top:0;">${b.title || 'Kern'}</div>
-              <div style="white-space:pre-wrap;">${b.body || ''}</div>
-            </div>
-          </div>
-        `;
-      }
-      if (kind === 'citations') {
-        const items = Array.isArray(b.items) ? b.items : [];
-        return html`
-          <div class="card" style="margin-top:14px;">
-            <div class="card-body">
-              <div class="section-title" style="margin-top:0;">${b.title || 'Bronnen'}</div>
-              <div class="small-muted" style="margin-bottom:8px;">Bronnen uit MCP (demo-dataset).</div>
-              <ul class="list">
-                ${items.map(it => html`
-                  <li>
-                    <div><a href=${it.url || '#'} target="_blank" rel="noreferrer">${it.title || it.url}</a></div>
-                    <div class="small-muted" style="margin-top:4px;">${it.snippet || ''}</div>
-                  </li>
-                `)}
-              </ul>
-            </div>
-          </div>
-        `;
-      }
-      if (kind === 'accordion') {
-        const items = Array.isArray(b.items) ? b.items : [];
-        return html`
-          <div class="card" style="margin-top:14px;">
-            <div class="card-body">
-              <div class="section-title" style="margin-top:0;">${b.title || 'Veelgestelde vragen'}</div>
-              <div style="display:grid; gap:10px; margin-top:10px;">
-                ${items.map(it => html`
-                  <details class="quote">
-                    <summary style="cursor:pointer;"><b>${it.q || ''}</b></summary>
-                    <div class="small-muted" style="margin-top:8px; white-space:pre-wrap;">${it.a || ''}</div>
-                  </details>
-                `)}
-              </div>
-            </div>
-          </div>
-        `;
-      }
-      if (kind === 'next_questions') {
-        const items = Array.isArray(b.items) ? b.items : [];
-        return html`
-          <div class="card" style="margin-top:14px;">
-            <div class="card-body">
-              <div class="section-title" style="margin-top:0;">${b.title || 'Vervolgvraag'}</div>
-              <div class="small-muted">Klik om direct opnieuw te zoeken.</div>
-              <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
-                ${items.map(q => html`
-                  <button class="pill" style="cursor:pointer;" @click=${() => this._genuiQuickSearch(String(q || ''))}>
-                    ${q}
-                  </button>
-                `)}
-              </div>
-            </div>
-          </div>
-        `;
-      }
-      if (kind === 'decision') {
-        const opts = Array.isArray(b.options) ? b.options : [];
-        const question = String(b.question || '').trim();
-        return html`
-          <div class="card" style="margin-top:14px;">
-            <div class="card-body">
-              <div class="section-title" style="margin-top:0;">${b.title || 'Keuze'}</div>
-              <div style="margin-top:6px;"><b>${question}</b></div>
-              <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
-                ${opts.map(opt => html`
-                  <button class="pill" style="cursor:pointer;" @click=${() => this._genuiTreeChoose(String(opt || ''))}>
-                    ${opt}
-                  </button>
-                `)}
-              </div>
-            </div>
-          </div>
-        `;
-      }
+_humanizeGenuiSourceReason(reasonRaw) {
+  const raw = String(reasonRaw || '').trim();
+  if (!raw) return { label: '', code: '' };
+  const r = raw.toLowerCase();
+  if (r.includes('resource_exhausted')) return { code: 'resource_exhausted', label: 'Quota bereikt' };
+  if (r.includes('http_429') || r.includes(' 429') || r.includes('429')) return { code: 'http_429', label: 'Te veel verzoeken (HTTP 429)' };
+  if (r.includes('bad_json') || (r.includes('json') && (r.includes('parse') || r.includes('decode') || r.includes('error')))) return { code: 'bad_json', label: 'Ongeldige JSON-output' };
+  if (r.includes('deterministic_tree')) return { code: 'deterministic_tree', label: 'Deterministische wizard' };
+  if (r.includes('deterministic_form_extend')) return { code: 'deterministic_form_extend', label: 'Formulier aangevuld' };
+  if (r.includes('deterministic_form_explain')) return { code: 'deterministic_form_explain', label: 'Deterministische vervolgstap' };
+  if (r.includes('deterministic_form')) return { code: 'deterministic_form', label: 'Deterministisch formulier' };
+  return { code: raw, label: raw };
+}
 
-if (kind === 'form') {
-  const fid = String(b.formId || 'form').trim() || 'form';
-  const title = b.title || 'Formulier';
-  const fields = Array.isArray(b.fields) ? b.fields : [];
-  const submitLabel = b.submitLabel || b.submit_label || 'Verstuur';
-  if (!this._formValues) this._formValues = {};
-  if (!this._formValues[fid]) this._formValues[fid] = {};
+_renderGenuiSourcePill() {
+  const source = String(getByPointer(this.model, '/status/source') || '').trim().toLowerCase();
+  const reasonRaw = String(getByPointer(this.model, '/status/sourceReason') || '').trim();
+  if (!source) return '';
+  const label = source === 'gemini' ? 'Gemini' : (source === 'fallback' ? 'Fallback' : source.toUpperCase());
+  const { label: reasonLabel } = this._humanizeGenuiSourceReason(reasonRaw);
+  const reason = String(reasonLabel || '').trim();
+  const title = reasonRaw ? `GenUI bron: ${label} · reason=${reasonRaw}` : `GenUI bron: ${label}`;
+  return html`
+    <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+      <div class="pill" title="${title}">GenUI: ${label}${reason ? ` · ${reason}` : ''}</div>
+    </div>
+  `;
+}
 
-  const renderField = (f) => {
-    if (!f || typeof f !== 'object') return '';
-    const id = String(f.id || '').trim();
-    if (!id) return '';
-    const label = String(f.label || id);
-    const required = !!f.required;
+_renderBlocks(blocks, opts = {}) {
+  const arr = Array.isArray(blocks) ? blocks : [];
+  if (!arr.length) {
+    return html`<div class="small-muted">Nog geen output. Start de demo en volg de stappen.</div>`;
+  }
+
+  const onDecisionChoose = typeof opts.onDecisionChoose === 'function' ? opts.onDecisionChoose : null;
+
+  const formValue = (formId, fieldId) => {
+    const fid = String(formId || 'form');
+    const vals = (this._formValues && this._formValues[fid]) ? this._formValues[fid] : {};
+    return vals[String(fieldId || '')] ?? '';
+  };
+
+  const renderField = (formId, f) => {
+    const fid = String(formId || 'form');
+    const id = String(f.id || '');
+    const label = f.label || id;
     const type = String(f.type || 'text');
-    const val = (this._formValues[fid] && this._formValues[fid][id] !== undefined) ? this._formValues[fid][id] : '';
-    const ph = f.placeholder ? String(f.placeholder) : '';
+    const required = !!f.required;
+    const placeholder = f.placeholder || '';
+    const v = formValue(fid, id);
 
-    if (type === 'select') {
-      const opts = Array.isArray(f.options) ? f.options : [];
-      return html`
-        <label class="small-muted" style="display:block; margin-top:10px;">
-          ${label}${required ? html` <span style="color:#b91c1c;">*</span>` : ''}
-        </label>
-        <select class="input" .value=${String(val)} @change=${(ev) => this._genuiFormFieldChange(fid, id, ev.target.value)}>
-          <option value="">—</option>
-          ${opts.map(o => html`<option value=${String(o)}>${o}</option>`)}
-        </select>
-      `;
-    }
+    const onInput = (ev) => {
+      const val = ev?.target?.value;
+      this._genuiFormFieldChange(fid, id, val);
+    };
 
     if (type === 'textarea') {
       return html`
-        <label class="small-muted" style="display:block; margin-top:10px;">
-          ${label}${required ? html` <span style="color:#b91c1c;">*</span>` : ''}
-        </label>
-        <textarea class="input" rows="3" placeholder=${ph} .value=${String(val)}
-          @input=${(ev) => this._genuiFormFieldChange(fid, id, ev.target.value)}></textarea>
+        <div style="display:grid; gap:6px;">
+          <div class="small-muted"><b>${label}</b>${required ? ' *' : ''}</div>
+          <textarea class="input" rows="4" .value=${String(v ?? '')} placeholder=${placeholder} @input=${onInput}></textarea>
+        </div>
+      `;
+    }
+
+    if (type === 'select') {
+      const options = Array.isArray(f.options) ? f.options : [];
+      return html`
+        <div style="display:grid; gap:6px;">
+          <div class="small-muted"><b>${label}</b>${required ? ' *' : ''}</div>
+          <select class="input" .value=${String(v ?? '')} @change=${onInput}>
+            <option value="">—</option>
+            ${options.map(o => html`<option value=${String(o)}>${o}</option>`)}
+          </select>
+        </div>
       `;
     }
 
     const inputType = (type === 'email' || type === 'number' || type === 'date') ? type : 'text';
     return html`
-      <label class="small-muted" style="display:block; margin-top:10px;">
-        ${label}${required ? html` <span style="color:#b91c1c;">*</span>` : ''}
-      </label>
-      <input class="input" type=${inputType} placeholder=${ph} .value=${String(val)}
-        @input=${(ev) => this._genuiFormFieldChange(fid, id, ev.target.value)} />
+      <div style="display:grid; gap:6px;">
+        <div class="small-muted"><b>${label}</b>${required ? ' *' : ''}</div>
+        <input class="input" type=${inputType} .value=${String(v ?? '')} placeholder=${placeholder} @input=${onInput} />
+      </div>
     `;
   };
 
-  return html`
-    <div class="card" style="margin-top:14px;">
-      <div class="card-body">
-        <div class="section-title" style="margin-top:0;">${title}</div>
-        ${fields.map(renderField)}
-        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:14px;">
-          <button class="btn" style="min-width:140px;" @click=${() => this._genuiFormSubmit(fid)}>
-            ${submitLabel}
-          </button>
-        </div>
-        <div class="small-muted" style="margin-top:10px;">* Verplicht veld (demo)</div>
-      </div>
-    </div>
-  `;
-}
+  const renderOne = (b) => {
+    if (!b || typeof b !== 'object') return '';
+    const kind = b.kind || '';
 
-      if (kind === 'notice') {
-        return html`
-          <div class="status" style="margin-top:14px;">
-            <div class="status-dot"></div>
-            <div><b>${b.title || 'Let op:'}</b> ${b.body || ''}</div>
-          </div>
-        `;
-      }
+    if (kind === 'callout') {
       return html`
         <div class="card" style="margin-top:14px;">
           <div class="card-body">
-            <div class="section-title" style="margin-top:0;">Onbekend blok</div>
-            <pre style="white-space:pre-wrap;">${JSON.stringify(b, null, 2)}</pre>
+            <div class="section-title" style="margin-top:0;">${b.title || 'Kern'}</div>
+            <div style="white-space:pre-wrap;">${b.body || ''}</div>
           </div>
         </div>
       `;
-    };
+    }
 
-    return html`${arr.map(renderOne)}`;
-  }
+    if (kind === 'citations') {
+      const items = Array.isArray(b.items) ? b.items : [];
+      return html`
+        <div class="card" style="margin-top:14px;">
+          <div class="card-body">
+            <div class="section-title" style="margin-top:0;">${b.title || 'Bronnen'}</div>
+            <div class="small-muted" style="margin-bottom:8px;">Bronnen uit MCP (demo-dataset).</div>
+            <ul class="list">
+              ${items.map(it => html`
+                <li>
+                  <div><a href=${it.url || '#'} target="_blank" rel="noreferrer">${it.title || it.url}</a></div>
+                  <div class="small-muted" style="margin-top:4px;">${it.snippet || ''}</div>
+                </li>
+              `)}
+            </ul>
+          </div>
+        </div>
+      `;
+    }
 
-  _genuiQuickSearch(q) {
-    const qq = String(q || '').trim();
-    if (!qq) return;
+    if (kind === 'accordion') {
+      const items = Array.isArray(b.items) ? b.items : [];
+      return html`
+        <div class="card" style="margin-top:14px;">
+          <div class="card-body">
+            <div class="section-title" style="margin-top:0;">${b.title || 'Veelgestelde vragen'}</div>
+            <div style="display:grid; gap:10px; margin-top:10px;">
+              ${items.map(it => html`
+                <details class="quote">
+                  <summary style="cursor:pointer;"><b>${it.q || ''}</b></summary>
+                  <div class="small-muted" style="margin-top:8px; white-space:pre-wrap;">${it.a || ''}</div>
+                </details>
+              `)}
+            </div>
+          </div>
+        </div>
+      `;
+    }
 
-    // Works on genui_search (input exists) and on other surfaces (e.g. genui_tree).
-    // We deliberately trigger the orchestrator flow directly to avoid dependence on DOM elements.
-    const input = this.renderRoot.querySelector('#genuiQuery');
-    if (input) input.value = qq;
+    if (kind === 'next_questions') {
+      const items = Array.isArray(b.items) ? b.items : [];
+      return html`
+        <div class="card" style="margin-top:14px;">
+          <div class="card-body">
+            <div class="section-title" style="margin-top:0;">${b.title || 'Vervolgvraag'}</div>
+            <div class="small-muted">Klik om direct te zoeken.</div>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
+              ${items.map(q => html`
+                <button class="pill" style="cursor:pointer;" @click=${() => this._genuiQuickSearch(String(q || ''))}>
+                  ${q}
+                </button>
+              `)}
+            </div>
+          </div>
+        </div>
+      `;
+    }
 
-    this._sendClientEvent('genui_search', 'genui/search', { query: qq });
-  }
+    if (kind === 'notice') {
+      return html`
+        <div class="status" style="margin-top:14px;">
+          <div class="status-dot"></div>
+          <div><b>${b.title || 'Let op:'}</b> ${b.body || ''}</div>
+        </div>
+      `;
+    }
+
+    if (kind === 'decision') {
+      const q = b.question || b.title || 'Kies een optie';
+      const options = Array.isArray(b.options) ? b.options : [];
+      return html`
+        <div class="card" style="margin-top:14px;">
+          <div class="card-body">
+            <div class="section-title" style="margin-top:0;">${q}</div>
+            <div class="small-muted">${b.help || ''}</div>
+            <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:12px;">
+              ${options.map(opt => html`
+                <button class="btn" style="min-width:180px;" @click=${() => onDecisionChoose ? onDecisionChoose(opt) : null}>
+                  ${opt.label || opt}
+                </button>
+              `)}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    if (kind === 'form') {
+      const formId = String(b.formId || 'form');
+      const fields = Array.isArray(b.fields) ? b.fields : [];
+      const submitLabel = b.submitLabel || b.submit_label || 'Verstuur';
+
+      return html`
+        <div class="card" style="margin-top:14px;">
+          <div class="card-body">
+            <div class="section-title" style="margin-top:0;">${b.title || 'Formulier'}</div>
+            <div class="small-muted">Velden met * zijn verplicht (demo).</div>
+
+            <div style="display:grid; gap:12px; margin-top:12px;">
+              ${fields.map(f => renderField(formId, f))}
+            </div>
+
+            <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+              <button class="btn" @click=${() => this._genuiFormSubmit(formId)}>${submitLabel}</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // Unknown block
+    return html`
+      <div class="card" style="margin-top:14px;">
+        <div class="card-body">
+          <div class="section-title" style="margin-top:0;">Onbekend blok</div>
+          <pre style="white-space:pre-wrap;">${JSON.stringify(b, null, 2)}</pre>
+        </div>
+      </div>
+    `;
+  };
+
+  return html`${arr.map(renderOne)}`;
+}
+
+_genuiQuickSearch(q) {
+  const qq = String(q || '').trim();
+  if (!qq) return;
+
+  // Prefill the search input when the orchestrator opens genui_search
+  this._pendingGenuiPrefill = qq;
+
+  // Ensure we navigate to GenUI Search and run the search server-side
+  this._nav('genui_search');
+  this._sendClientEvent('genui_search', 'genui/search', { query: qq });
+}
 
   _genuiSearch() {
     const loading = !!getByPointer(this.model, '/status/loading');
@@ -831,71 +849,13 @@ if (kind === 'form') {
     this._sendClientEvent('genui_search', 'genui/search', { query });
   }
 
-
-  _genuiTreeStart() {
-    const loading = !!getByPointer(this.model, '/status/loading');
-    if (loading) return;
-    this._sendClientEvent('genui_tree', 'genui_tree/start', {});
-  }
-
-  _genuiTreeChoose(option) {
-    const loading = !!getByPointer(this.model, '/status/loading');
-    if (loading) return;
-    const opt = String(option || '').trim();
-    if (!opt) return;
-    this._sendClientEvent('genui_tree', 'genui_tree/choose', { option: opt });
-  }
-
-  _humanizeGenuiSourceReason(reasonRaw) {
-    const raw = String(reasonRaw || '').trim();
-    if (!raw) return { label: '', code: '' };
-
-    const r = raw.toLowerCase();
-
-    // Expected codes from the GenUI agent / orchestrator.
-    if (r === 'resource_exhausted' || r.includes('resource_exhausted')) {
-      return { code: 'resource_exhausted', label: 'Quota bereikt' };
-    }
-    if (r === 'http_429' || r.includes('http_429') || r.includes(' 429') || r.endsWith('429') || r.includes('429 too many')) {
-      return { code: 'http_429', label: 'Te veel verzoeken (HTTP 429)' };
-    }
-    if (r === 'bad_json' || r.includes('bad_json') || r.includes('invalid_json') || (r.includes('json') && (r.includes('parse') || r.includes('decode') || r.includes('error')))) {
-      return { code: 'bad_json', label: 'Ongeldige JSON-output' };
-    }
-    if (r === 'a2a_down_or_error' || r.includes('a2a_down_or_error')) {
-      return { code: 'a2a_down_or_error', label: 'GenUI-agent niet bereikbaar' };
-    }
-    if (r === 'deterministic_tree' || r.includes('deterministic_tree')) {
-      return { code: 'deterministic_tree', label: 'Deterministische wizard' };
-    }
-
-    if (r === 'deterministic_form' || r.includes('deterministic_form')) {
-      return { code: 'deterministic_form', label: 'Deterministisch formulier' };
-    }
-    if (r === 'deterministic_form_explain' || r.includes('deterministic_form_explain')) {
-      return { code: 'deterministic_form_explain', label: 'Vervolgstappen' };
-    }
-    if (r === 'deterministic_form_extend' || r.includes('deterministic_form_extend')) {
-      return { code: 'deterministic_form_extend', label: 'Formulier aangevuld' };
-    }
-
-    // Default: show as-is (kept for future reason codes).
-    return { code: raw, label: raw };
-  }
-
+  
   _renderGenuiSourcePill() {
     const source = String(getByPointer(this.model, '/status/source') || '').trim().toLowerCase();
-    const reasonRaw = String(getByPointer(this.model, '/status/sourceReason') || '').trim();
-
+    const reason = String(getByPointer(this.model, '/status/sourceReason') || '').trim();
     if (!source) return '';
-
     const label = source === 'gemini' ? 'Gemini' : (source === 'fallback' ? 'Fallback' : source.toUpperCase());
-    const { label: reasonLabel } = this._humanizeGenuiSourceReason(reasonRaw);
-    const reason = String(reasonLabel || '').trim();
-
-    // Tooltip shows the raw code (useful for debugging), pill shows human-friendly text.
-    const title = reasonRaw ? `GenUI bron: ${label} · reason=${reasonRaw}` : `GenUI bron: ${label}`;
-
+    const title = reason ? `GenUI bron: ${label} (${reason})` : `GenUI bron: ${label}`;
     return html`
       <div style="display:flex; justify-content:flex-end; margin-top:10px;">
         <div class="pill" title="${title}">GenUI: ${label}${reason ? ` · ${reason}` : ''}</div>
@@ -939,71 +899,63 @@ _renderGenuiSearch() {
             ${this._renderGenuiSourcePill()}
 
             ${this._renderBlocks(blocks)}
-          
-
-<!-- Idee 2: Form-on-the-fly -->
-<div class="card tile">
-  <div class="card-title">Generatieve UI — Formulier</div>
-  <div class="tile-icon">${genuiFormIconSvg}</div>
-  <div class="card-sub">Laat een formulier genereren en valideer<br/>deterministisch (demo).</div>
-  <div style="padding-bottom:22px;">
-    <button class="btn" @click=${() => this._nav('genui_form')}>Start</button>
-  </div>
-</div>
-
-</div>
+          </div>
         </div>
       </div>
     `;
   }
 
-  
 
-_genuiFormGenerate() {
+
+_renderGenuiWizard() {
   const loading = !!getByPointer(this.model, '/status/loading');
-  if (loading) return;
-  const q = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
-  if (!q) return;
-  this._sendClientEvent('genui_form', 'genui_form/generate', { query: q });
+  const blocks = (getByPointer(this.model, '/results') || []);
+  const path = getByPointer(this.model, '/tree/path') || [];
+  const pathLabel = Array.isArray(path) && path.length ? path.join(' → ') : '—';
+
+  return html`
+    <div class="container">
+      <div class="topbar">
+        <button class="link" @click=${() => this._nav('home')}>← Terug</button>
+        <div class="small-muted">${this.connected ? 'Verbonden' : 'Niet verbonden'}</div>
+      </div>
+
+      <div class="card">
+        <div class="header" style="height:64px;border-radius:14px 14px 0 0;">
+          <div class="header-left">
+            <div class="logo">${logoSvg}</div>
+            <div style="font-size:26px;font-weight:650;">Generatieve UI — Wizard</div>
+          </div>
+          <div class="hamburger">${menuSvg}</div>
+        </div>
+
+        <div class="card-body">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+            <div class="small-muted">Pad: ${pathLabel}</div>
+            <button class="link" style="padding:0;" ?disabled=${loading} @click=${() => this._sendClientEvent('genui_tree','genui_tree/start', {})}>Opnieuw starten</button>
+          </div>
+
+          ${this._renderStatus()}
+          ${this._renderGenuiSourcePill()}
+
+          ${this._renderBlocks(blocks, { onDecisionChoose: (opt) => this._genuiTreeChoose(opt) })}
+        </div>
+      </div>
+    </div>
+  `;
 }
 
-_genuiFormSubmit(formId) {
+_genuiTreeChoose(opt) {
   const loading = !!getByPointer(this.model, '/status/loading');
   if (loading) return;
-  const fid = String(formId || 'form').trim() || 'form';
-  const vals = (this._formValues && this._formValues[fid]) ? this._formValues[fid] : {};
-  this._sendClientEvent('genui_form', 'genui_form/submit', { values: vals });
-}
-
-_genuiFormFieldChange(formId, fieldId, value) {
-  const fid = String(formId || 'form').trim() || 'form';
-  const field = String(fieldId || '').trim();
-  if (!field) return;
-
-  if (!this._formValues) this._formValues = {};
-  if (!this._formValues[fid]) this._formValues[fid] = {};
-  this._formValues[fid][field] = value;
-
-  // Debounced schema enrichment (Variant A)
-  try {
-    if (!this._formChangeTimers) this._formChangeTimers = {};
-    if (this._formChangeTimers[fid]) clearTimeout(this._formChangeTimers[fid]);
-    this._formChangeTimers[fid] = setTimeout(() => {
-      const query = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
-      const vals = (this._formValues && this._formValues[fid]) ? this._formValues[fid] : {};
-      this._sendClientEvent('genui_form', 'genui_form/change', { values: vals, query });
-    }, 400);
-  } catch (e) {
-    // never break UI on enhancement
-  }
-
-  this.requestUpdate();
+  const choice = (opt && typeof opt === 'object') ? (opt.value ?? opt.id ?? opt.label) : opt;
+  this._sendClientEvent('genui_tree', 'genui_tree/choose', { choice });
 }
 
 _renderGenuiForm() {
   const loading = !!getByPointer(this.model, '/status/loading');
   const blocks = (getByPointer(this.model, '/results') || []);
-  const hasBlocks = Array.isArray(blocks) && blocks.length;
+  const query = getByPointer(this.model, '/form/query') || '';
 
   return html`
     <div class="container">
@@ -1024,72 +976,62 @@ _renderGenuiForm() {
         <div class="card-body">
           <div class="form-grid">
             <div>Vraag:</div>
-            <input class="input" id="genuiFormQuery" placeholder="Bijv. 'Ik wil uitstel van betaling aanvragen'" />
+            <input class="input" id="genuiFormQuery" .value=${String(query || '')} placeholder="Bijv. 'Ik wil uitstel van betaling aanvragen'"/>
 
             <div></div>
             <div style="display:flex; justify-content:flex-end; gap:10px;">
-              <button class="btn" style="min-width:170px;" ?disabled=${loading} @click=${this._genuiFormGenerate}>Genereer formulier</button>
+              <button class="btn" style="min-width:180px;" ?disabled=${loading} @click=${this._genuiFormGenerate}>Genereer formulier</button>
             </div>
           </div>
 
           ${this._renderStatus()}
           ${this._renderGenuiSourcePill()}
 
-          ${hasBlocks ? this._renderBlocks(blocks) : html`<div class="small-muted">Nog geen output. Typ een vraag en klik op “Genereer formulier”.</div>`}
+          ${this._renderBlocks(blocks)}
         </div>
       </div>
     </div>
   `;
 }
 
-_renderGenuiTree() {
-    const loading = !!getByPointer(this.model, '/status/loading');
-    const blocks = (getByPointer(this.model, '/results') || []);
-    const hasBlocks = Array.isArray(blocks) && blocks.length;
+_genuiFormGenerate() {
+  const loading = !!getByPointer(this.model, '/status/loading');
+  if (loading) return;
+  const query = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
+  if (!query) return;
+  this._sendClientEvent('genui_form', 'genui/form_generate', { query });
+}
 
-    return html`
-      <div class="container">
-        <div class="topbar">
-          <button class="link" @click=${() => this._nav('home')}>← Terug</button>
-          <div class="small-muted">${this.connected ? 'Verbonden' : 'Niet verbonden'}</div>
-        </div>
+_genuiFormFieldChange(formId, fieldId, value) {
+  const fid = String(formId || 'form');
+  if (!this._formValues) this._formValues = {};
+  if (!this._formValues[fid]) this._formValues[fid] = {};
+  this._formValues[fid][String(fieldId || '')] = value;
 
-        <div class="card">
-          <div class="header" style="height:64px;border-radius:14px 14px 0 0;">
-            <div class="header-left">
-              <div class="logo">${logoSvg}</div>
-              <div style="font-size:26px;font-weight:650;">Generatieve UI — Wizard</div>
-            </div>
-            <div class="hamburger">${menuSvg}</div>
-          </div>
-
-          <div class="card-body">
-            <div style="display:flex; justify-content:flex-end; gap:10px;">
-              <button class="btn" style="min-width:170px;" ?disabled=${loading} @click=${this._genuiTreeStart}>Opnieuw starten</button>
-            </div>
-
-            ${this._renderStatus()}
-
-            ${this._renderGenuiSourcePill()}
-
-            ${hasBlocks ? this._renderBlocks(blocks) : html`<div class="small-muted">Nog geen output. Klik op “Opnieuw starten”.</div>`}
-          
-
-<!-- Idee 2: Form-on-the-fly -->
-<div class="card tile">
-  <div class="card-title">Generatieve UI — Formulier</div>
-  <div class="tile-icon">${genuiFormIconSvg}</div>
-  <div class="card-sub">Laat een formulier genereren en valideer<br/>deterministisch (demo).</div>
-  <div style="padding-bottom:22px;">
-    <button class="btn" @click=${() => this._nav('genui_form')}>Start</button>
-  </div>
-</div>
-
-</div>
-        </div>
-      </div>
-    `;
+  // Variant A: deterministic debounced extend
+  try {
+    if (!this._formChangeTimers) this._formChangeTimers = {};
+    if (this._formChangeTimers[fid]) clearTimeout(this._formChangeTimers[fid]);
+    this._formChangeTimers[fid] = setTimeout(() => {
+      const query = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
+      const vals = (this._formValues && this._formValues[fid]) ? this._formValues[fid] : {};
+      this._sendClientEvent('genui_form', 'genui/form_change', { formId: fid, values: vals, query });
+    }, 400);
+  } catch (e) {
+    // never break UI
   }
+
+  this.requestUpdate();
+}
+
+_genuiFormSubmit(formId) {
+  const loading = !!getByPointer(this.model, '/status/loading');
+  if (loading) return;
+  const fid = String(formId || 'form');
+  const query = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
+  const vals = (this._formValues && this._formValues[fid]) ? this._formValues[fid] : {};
+  this._sendClientEvent('genui_form', 'genui/form_submit', { formId: fid, values: vals, query });
+}
 
 
   render() {
@@ -1101,7 +1043,7 @@ _renderGenuiTree() {
           ${this.surfaceId === 'toeslagen' ? this._renderToeslagen() : ''}
           ${this.surfaceId === 'bezwaar' ? this._renderBezwaar() : ''}
           ${this.surfaceId === 'genui_search' ? this._renderGenuiSearch() : ''}
-          ${this.surfaceId === 'genui_tree' ? this._renderGenuiTree() : ''}
+          ${this.surfaceId === 'genui_tree' ? this._renderGenuiWizard() : ''}
           ${this.surfaceId === 'genui_form' ? this._renderGenuiForm() : ''}
         </div>
       </div>
