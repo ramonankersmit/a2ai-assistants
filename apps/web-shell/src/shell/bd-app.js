@@ -677,9 +677,15 @@ export class BdApp extends LitElement {
   }
 
   _genuiQuickSearch(q) {
+    const qq = String(q || '').trim();
+    if (!qq) return;
+
+    // Works on genui_search (input exists) and on other surfaces (e.g. genui_tree).
+    // We deliberately trigger the orchestrator flow directly to avoid dependence on DOM elements.
     const input = this.renderRoot.querySelector('#genuiQuery');
-    if (input) input.value = q;
-    this._genuiSearch();
+    if (input) input.value = qq;
+
+    this._sendClientEvent('genui_search', 'genui/search', { query: qq });
   }
 
   _genuiSearch() {
