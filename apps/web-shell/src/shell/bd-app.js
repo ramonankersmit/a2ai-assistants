@@ -2,6 +2,34 @@ import { LitElement, html } from 'lit';
 import { applyPatches, getByPointer } from './jsonpatch.js';
 import { clipboardIconSvg, pencilIconSvg, logoSvg, menuSvg } from './icons.js';
 
+
+
+// Inline icons for GenUI tiles (match the SVG style of the other tiles)
+const genuiSearchIconSvg = html`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <circle cx="11" cy="11" r="7"></circle>
+  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+</svg>`;
+
+const genuiWizardIconSvg = html`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="M3 6h8"></path>
+  <path d="M3 12h12"></path>
+  <path d="M3 18h8"></path>
+  <path d="M19 6v12"></path>
+  <path d="M15 9l4-3 4 3"></path>
+  <path d="M15 15l4 3 4-3"></path>
+</svg>`;
+
+const genuiFormIconSvg = html`<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+  stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+  <path d="M14 2v6h6"></path>
+  <path d="M8 13h8"></path>
+  <path d="M8 17h8"></path>
+  <path d="M8 9h2"></path>
+</svg>`;
+
 const ORCH_BASE = 'http://localhost:10002';
 
 export class BdApp extends LitElement {
@@ -26,8 +54,8 @@ export class BdApp extends LitElement {
 
     this.statusHistory = [];
     this.statusCollapsed = false;
-    this._pendingGenuiPrefill = '';
-    this._formValues = {};
+
+    this._formChangeTimers = {};
   }
 
   createRenderRoot() { return this; }
@@ -100,19 +128,6 @@ export class BdApp extends LitElement {
 
       this.statusHistory = [];
       this._pushStatusHistory(this.model);
-
-
-
-// If the orchestrator opened the GenUI Search surface as a result of a quick-search click (e.g. Wizard next_questions),
-// prefill the search field after the surface has rendered.
-if (this.surfaceId === 'genui_search' && this._pendingGenuiPrefill) {
-  const q = String(this._pendingGenuiPrefill || '').trim();
-  this._pendingGenuiPrefill = '';
-  setTimeout(() => {
-    const input = this.renderRoot.querySelector('#genuiQuery');
-    if (input) input.value = q;
-  }, 0);
-}
 
       this.requestUpdate();
       return;
@@ -190,7 +205,7 @@ if (this.surfaceId === 'genui_search' && this._pendingGenuiPrefill) {
           <!-- Idee 1: GenUI Search -->
           <div class="card tile">
             <div class="card-title">Generatieve UI — Zoeken</div>
-            <div class="tile-icon">🔎</div>
+            <div class="tile-icon">${genuiSearchIconSvg}</div>
             <div class="card-sub">Zoek (demo) op onderwerpen en laat<br/>de UI-blokken dynamisch verschijnen.</div>
             <div style="padding-bottom:22px;">
               <button class="btn" @click=${() => this._nav('genui_search')}>Start</button>
@@ -201,22 +216,12 @@ if (this.surfaceId === 'genui_search' && this._pendingGenuiPrefill) {
           <!-- Idee 3: Decision Tree Wizard -->
           <div class="card tile">
             <div class="card-title">Generatieve UI — Wizard</div>
-            <div class="tile-icon">🧭</div>
+            <div class="tile-icon">${genuiWizardIconSvg}</div>
             <div class="card-sub">Doorloop een korte beslisboom (demo)<br/>met klikbare keuzes en vervolgstappen.</div>
             <div style="padding-bottom:22px;">
               <button class="btn" @click=${() => this._nav('genui_tree')}>Start</button>
             </div>
           </div>
-
-<!-- Idee 2: Form-on-the-fly -->
-<div class="card tile">
-  <div class="card-title">Generatieve UI — Formulier</div>
-  <div class="tile-icon">📝</div>
-  <div class="card-sub">Genereer een klein formulier (demo)<br/>en valideer uw invoer deterministisch.</div>
-  <div style="padding-bottom:22px;">
-    <button class="btn" @click=${() => this._nav('genui_form')}>Start</button>
-  </div>
-</div>
         </div>
       </div>
     `;
@@ -589,7 +594,6 @@ if (this.surfaceId === 'genui_search' && this._pendingGenuiPrefill) {
 
   _renderBlocks(blocks) {
     const arr = Array.isArray(blocks) ? blocks : [];
-    const loading = !!getByPointer(this.model, '/status/loading');
     if (!arr.length) {
       return html`<div class="small-muted">Nog geen output. Stel een vraag en klik op “Zoek”.</div>`;
     }
@@ -672,7 +676,7 @@ if (this.surfaceId === 'genui_search' && this._pendingGenuiPrefill) {
               <div style="margin-top:6px;"><b>${question}</b></div>
               <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
                 ${opts.map(opt => html`
-                  <button class="pill" style=${loading ? 'cursor:not-allowed; opacity:0.6;' : 'cursor:pointer;'} ?disabled=${loading} @click=${() => this._genuiTreeChoose(String(opt || ''))}>
+                  <button class="pill" style="cursor:pointer;" @click=${() => this._genuiTreeChoose(String(opt || ''))}>
                     ${opt}
                   </button>
                 `)}
@@ -681,109 +685,7 @@ if (this.surfaceId === 'genui_search' && this._pendingGenuiPrefill) {
           </div>
         `;
       }
-      
-if (kind === 'form') {
-  const loading = !!getByPointer(this.model, '/status/loading');
-  const formId = String(b.formId || b.id || 'form').trim() || 'form';
-  const title = String(b.title || 'Formulier').trim();
-  const desc = String(b.description || '').trim();
-  const submitLabel = String(b.submitLabel || 'Verstuur').trim();
-  const fields = Array.isArray(b.fields) ? b.fields : [];
-
-  const schema = fields.map(f => ({
-    id: String(f.id || '').trim(),
-    label: String(f.label || f.id || '').trim(),
-    type: String(f.type || 'text').trim(),
-    required: !!f.required,
-    placeholder: String(f.placeholder || '').trim(),
-    pattern: String(f.pattern || '').trim(),
-    min: f.min,
-    max: f.max,
-    minLength: f.minLength,
-    maxLength: f.maxLength,
-    options: Array.isArray(f.options) ? f.options : [],
-  })).filter(f => !!f.id);
-
-  const vals = (this._formValues && this._formValues[formId]) ? this._formValues[formId] : {};
-
-  const renderField = (f) => {
-    const v = vals[f.id] ?? '';
-    if (f.type === 'textarea') {
-      return html`
-        <div style="grid-column:1 / -1;">
-          <div class="small-muted" style="margin-bottom:6px;"><b>${f.label}${f.required ? ' *' : ''}</b></div>
-          <textarea
-            class="input"
-            style="min-height:96px;"
-            .value=${String(v)}
-            ?disabled=${loading}
-            placeholder=${f.placeholder || ''}
-            @input=${(e) => this._genuiFormFieldChange(formId, f.id, e.target.value)}
-          ></textarea>
-        </div>
-      `;
-    }
-
-    if (f.type === 'select') {
-      return html`
-        <div>
-          <div class="small-muted" style="margin-bottom:6px;"><b>${f.label}${f.required ? ' *' : ''}</b></div>
-          <select
-            class="input"
-            .value=${String(v)}
-            ?disabled=${loading}
-            @change=${(e) => this._genuiFormFieldChange(formId, f.id, e.target.value)}
-          >
-            <option value="">—</option>
-            ${(f.options || []).map(opt => html`<option value=${String(opt)}>${String(opt)}</option>`)}
-          </select>
-        </div>
-      `;
-    }
-
-    const inputType = (f.type === 'number') ? 'number'
-      : (f.type === 'email') ? 'email'
-      : (f.type === 'date') ? 'date'
-      : 'text';
-
-    return html`
-      <div>
-        <div class="small-muted" style="margin-bottom:6px;"><b>${f.label}${f.required ? ' *' : ''}</b></div>
-        <input
-          class="input"
-          type=${inputType}
-          .value=${String(v)}
-          ?disabled=${loading}
-          placeholder=${f.placeholder || ''}
-          @input=${(e) => this._genuiFormFieldChange(formId, f.id, e.target.value)}
-        />
-      </div>
-    `;
-  };
-
-  return html`
-    <div class="card" style="margin-top:14px;">
-      <div class="card-body">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-          <div class="section-title" style="margin-top:0;">${title}</div>
-          <div class="pill" title="Demo-formulier">Form</div>
-        </div>
-
-        ${desc ? html`<div class="small-muted" style="margin-top:6px;">${desc}</div>` : ''}
-
-        <div class="form-grid" style="margin-top:12px; grid-template-columns: repeat(2, minmax(0, 1fr));">
-          ${schema.map(renderField)}
-        </div>
-
-        <div style="display:flex; justify-content:flex-end; margin-top:12px; gap:10px;">
-          <button class="btn" style="min-width:160px;" ?disabled=${loading} @click=${() => this._genuiFormSubmit(formId, schema)}>${submitLabel}</button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-if (kind === 'notice') {
+      if (kind === 'notice') {
         return html`
           <div class="status" style="margin-top:14px;">
             <div class="status-dot"></div>
@@ -812,9 +714,6 @@ if (kind === 'notice') {
     // We deliberately trigger the orchestrator flow directly to avoid dependence on DOM elements.
     const input = this.renderRoot.querySelector('#genuiQuery');
     if (input) input.value = qq;
-
-    // Store the query so when the orchestrator opens the genui_search surface we can prefill the input.
-    this._pendingGenuiPrefill = qq;
 
     this._sendClientEvent('genui_search', 'genui/search', { query: qq });
   }
@@ -865,6 +764,16 @@ if (kind === 'notice') {
     }
     if (r === 'deterministic_tree' || r.includes('deterministic_tree')) {
       return { code: 'deterministic_tree', label: 'Deterministische wizard' };
+    }
+
+    // Default: show as-is
+    if (r === 'deterministic_form_extend' || r.includes('deterministic_form_extend')) {
+      return { code: 'deterministic_form_extend', label: 'Formulier aangevuld' };
+    }
+
+    // Default: show as-is
+    if (r === 'deterministic_form_explain' || r.includes('deterministic_form_explain')) {
+      return { code: 'deterministic_form_explain', label: 'Deterministische vervolgstap' };
     }
 
     // Default: show as-is
@@ -938,88 +847,10 @@ _renderGenuiSearch() {
     `;
   }
 
-  
-
-_genuiFormGenerate() {
-  const loading = !!getByPointer(this.model, '/status/loading');
-  if (loading) return;
-
-  const query = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
-  if (!query) return;
-
-  this._sendClientEvent('genui_form', 'genui/form_generate', { query });
-}
-
-_genuiFormFieldChange(formId, fieldId, value) {
-  const fid = String(formId || 'form').trim() || 'form';
-  const key = String(fieldId || '').trim();
-  if (!key) return;
-
-  if (!this._formValues) this._formValues = {};
-  if (!this._formValues[fid]) this._formValues[fid] = {};
-  this._formValues[fid][key] = value;
-  this.requestUpdate();
-}
-
-_genuiFormSubmit(formId, schema) {
-  const loading = !!getByPointer(this.model, '/status/loading');
-  if (loading) return;
-
-  const fid = String(formId || 'form').trim() || 'form';
-  const values = (this._formValues && this._formValues[fid]) ? this._formValues[fid] : {};
-  const query = (this.renderRoot.querySelector('#genuiFormQuery')?.value || '').trim();
-
-  // schema is passed to orchestrator for demo robustness; orchestrator also keeps state.
-  this._sendClientEvent('genui_form', 'genui/form_submit', { formId: fid, values, query, schema });
-}
-
-_renderGenuiForm() {
-  const loading = !!getByPointer(this.model, '/status/loading');
-  const blocks = (getByPointer(this.model, '/results') || []);
-
-  return html`
-    <div class="container">
-      <div class="topbar">
-        <button class="link" @click=${() => this._nav('home')}>← Terug</button>
-        <div class="small-muted">${this.connected ? 'Verbonden' : 'Niet verbonden'}</div>
-      </div>
-
-      <div class="card">
-        <div class="header" style="height:64px;border-radius:14px 14px 0 0;">
-          <div class="header-left">
-            <div class="logo">${logoSvg}</div>
-            <div style="font-size:26px;font-weight:650;">Generatieve UI — Formulier</div>
-          </div>
-          <div class="hamburger">${menuSvg}</div>
-        </div>
-
-        <div class="card-body">
-          <div class="form-grid">
-            <div>Vraag:</div>
-            <input class="input" id="genuiFormQuery" placeholder="Bijv. 'Ik wil uitstel van betaling aanvragen'" />
-
-            <div></div>
-            <div style="display:flex; justify-content:flex-end; gap:10px;">
-              <button class="btn" style="min-width:190px;" ?disabled=${loading} @click=${this._genuiFormGenerate}>Genereer formulier</button>
-            </div>
-          </div>
-
-          ${this._renderStatus()}
-
-          ${this._renderGenuiSourcePill()}
-
-          ${this._renderBlocks(blocks)}
-        </div>
-      </div>
-    </div>
-  `;
-}
-_renderGenuiTree() {
+  _renderGenuiTree() {
     const loading = !!getByPointer(this.model, '/status/loading');
     const blocks = (getByPointer(this.model, '/results') || []);
     const hasBlocks = Array.isArray(blocks) && blocks.length;
-    const path = getByPointer(this.model, '/tree/path') || [];
-    const pathLabel = Array.isArray(path) && path.length ? path.map(x => String(x)).join(' → ') : '—';
 
     return html`
       <div class="container">
@@ -1038,8 +869,7 @@ _renderGenuiTree() {
           </div>
 
           <div class="card-body">
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-              <div class="small-muted">Pad: ${pathLabel}</div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
               <button class="btn" style="min-width:170px;" ?disabled=${loading} @click=${this._genuiTreeStart}>Opnieuw starten</button>
             </div>
 
@@ -1065,7 +895,6 @@ _renderGenuiTree() {
           ${this.surfaceId === 'bezwaar' ? this._renderBezwaar() : ''}
           ${this.surfaceId === 'genui_search' ? this._renderGenuiSearch() : ''}
           ${this.surfaceId === 'genui_tree' ? this._renderGenuiTree() : ''}
-          ${this.surfaceId === 'genui_form' ? this._renderGenuiForm() : ''}
         </div>
       </div>
     `;

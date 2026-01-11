@@ -450,6 +450,10 @@ async def client_event(payload: Json = Body(...)):
         asyncio.create_task(run_genui_form_submit_flow(sid, data))
         return {"ok": True}
 
+    if name == "genui/form_change":
+        asyncio.create_task(run_genui_form_change_flow(sid, data))
+        return {"ok": True}
+
     if name == "genui_tree/start":
         asyncio.create_task(run_genui_tree_start_flow(sid, data))
         return {"ok": True}
@@ -959,6 +963,111 @@ async def run_genui_form_generate_flow(sid: str, inputs: Json) -> None:
         await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (Form fallback)", step="waiting")
 
 
+def _form_extend_fields(schema: List[Json], values: Dict[str, Any], query: str) -> List[Json]:
+    """Deterministische (variant A) field extension op basis van ingevulde waarden.
+    Bewust klein en voorspelbaar: dit is demo-UX (geen echt advies).
+    """
+    out: List[Json] = [f for f in schema if isinstance(f, dict)]
+    ids = {str(f.get("id")) for f in out if isinstance(f, dict) and f.get("id")}
+
+    def add_field(field: Json) -> None:
+        fid = str(field.get("id") or "")
+        if not fid or fid in ids:
+            return
+        out.append(field)
+        ids.add(fid)
+
+    qlow = (query or "").lower()
+
+    kenmerk = str(values.get("kenmerk") or "").strip()
+    if kenmerk and len(kenmerk) >= 6:
+        add_field({"id": "dagtekening", "label": "Dagtekening (op brief/aanslag)", "type": "date", "required": False})
+
+    bedrag_raw = values.get("bedrag")
+    try:
+        bedrag = float(bedrag_raw) if bedrag_raw not in (None, "") else 0.0
+    except Exception:
+        bedrag = 0.0
+
+    if bedrag > 0:
+        add_field({"id": "voorkeur", "label": "Waar gaat uw verzoek over?", "type": "select", "required": False,
+                   "options": ["Uitstel aanvragen", "Betalingsregeling aanvragen", "Ik weet het niet"]})
+        add_field({"id": "reden", "label": "Korte toelichting (waarom nu lastig betalen?)", "type": "textarea", "required": False,
+                   "minLength": 15, "placeholder": "Bijv. tijdelijk minder inkomen of onverwachte kosten (demo)."})
+
+    mot = str(values.get("motivering") or "").strip()
+    vraag = str(values.get("vraag") or "").strip()
+    if ("bezwaar" in qlow) or ("bezwaar" in (vraag.lower() if vraag else "")) or mot:
+        add_field({"id": "route", "label": "Hoe wilt u het liefst indienen?", "type": "select", "required": False,
+                   "options": ["Online", "Per post", "Weet ik niet"]})
+
+    return out[:12]
+
+
+async def run_genui_form_change_flow(sid: str, inputs: Json) -> None:
+    """Variant A (deterministisch): voeg velden toe op basis van ingevulde waarden.
+    Lichtgewicht: geen MCP/A2A calls, alleen model update.
+    """
+    surface_id = "genui_form"
+    form_id = str(inputs.get("formId") or "").strip() or "form"
+    values = inputs.get("values") or {}
+    if not isinstance(values, dict):
+        values = {}
+    query = str(inputs.get("query") or "").strip()
+
+    s = await hub.get(sid)
+    if not s:
+        return
+    model = s.get_model(surface_id)
+    form_state = model.get("form") if isinstance(model, dict) else None
+    if not isinstance(form_state, dict):
+        return
+
+    form_block = form_state.get("form")
+    if not isinstance(form_block, dict):
+        return
+
+    schema = form_block.get("fields") if isinstance(form_block.get("fields"), list) else []
+    schema = [f for f in (schema or []) if isinstance(f, dict)]
+
+    extended = _form_extend_fields(schema, values, query or str(form_state.get("query") or ""))
+
+    base_ids = [str(f.get("id")) for f in schema if isinstance(f, dict)]
+    ext_ids = [str(f.get("id")) for f in extended if isinstance(f, dict)]
+    if ext_ids == base_ids:
+        return
+
+    updated_form = {**form_block, "fields": extended, "formId": form_id}
+
+    await _set_form_state(
+        sid,
+        surface_id,
+        {
+            "query": query or str(form_state.get("query") or ""),
+            "citations": form_state.get("citations") or [],
+            "form": updated_form,
+        },
+    )
+
+    results = model.get("results") if isinstance(model, dict) else None
+    if not isinstance(results, list):
+        return
+
+    new_results: List[Json] = []
+    replaced = False
+    for b in results:
+        if isinstance(b, dict) and b.get("kind") == "form" and not replaced:
+            new_results.append(updated_form)
+            replaced = True
+        else:
+            new_results.append(b)
+
+    if not replaced:
+        new_results.append(updated_form)
+
+    await _set_results(sid, surface_id, _sanitize_genui_blocks(new_results))
+
+
 async def run_genui_form_submit_flow(sid: str, inputs: Json) -> None:
     surface_id = "genui_form"
     form_id = str(inputs.get("formId") or "").strip() or "form"
@@ -984,7 +1093,7 @@ async def run_genui_form_submit_flow(sid: str, inputs: Json) -> None:
     if form_block and isinstance(form_block.get("fields"), list):
         schema = form_block.get("fields") or []
 
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Validatie uitvoeren (MCP)…", step="validate_form", source="fallback", sourceReason="deterministic_form")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Validatie uitvoeren (MCP)…", step="validate_form", source=ui_source, sourceReason="deterministic_form")
     await _sleep_tick()
 
     validate_resp = await _mcp_call_with_trace(sid, surface_id, "validate_form", {"schema": schema, "values": values}, step="validate_form")
@@ -1004,19 +1113,32 @@ async def run_genui_form_submit_flow(sid: str, inputs: Json) -> None:
                 lines.append(f"- {fld}: {msg}")
         notice = {"kind": "notice", "title": "Controleer invoer", "body": "\n".join(lines)}
 
-    await _set_status(sid, surface_id, loading=True, message="A2UI: Uitleg maken (A2A)…", step="explain_form", source="fallback", sourceReason="deterministic_form")
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Uitleg maken (A2A)…", step="explain_form", source=ui_source, sourceReason="deterministic_form")
     await _sleep_tick()
 
     explain_blocks: List[Json] = []
     try:
         resp = await _a2a_call_with_trace(sid, surface_id, a2a_genui, "explain_form", {"query": query, "ok": ok, "errors": errors, "values": values, "formId": form_id}, step="explain_form")
-        data = resp.get("data") if isinstance(resp, dict) else None
-        blocks_raw = (data.get("blocks") if isinstance(data, dict) else None) or []
+        data = _a2a_data_dict(resp)
+        blocks_raw = data.get('blocks') or []
+        if isinstance(blocks_raw, dict):
+            blocks_raw = [blocks_raw]
         explain_blocks = _sanitize_genui_blocks(blocks_raw)
     except Exception:
         explain_blocks = [
             {"kind": "callout", "title": "Vervolgstap (demo)", "body": "Ga verder met het verzamelen van relevante stukken en controleer de termijnen. (Deterministische fallback.)"}
         ]
+
+
+
+ui_source = "fallback"
+ui_reason = "deterministic_form"
+try:
+    if 'data' in locals() and isinstance(data, dict):
+        ui_source = str(data.get("ui_source") or ui_source)
+        ui_reason = str(data.get("ui_source_reason") or ui_reason)
+except Exception:
+    pass
 
     merged: List[Json] = []
     if citations:
@@ -1035,6 +1157,6 @@ async def run_genui_form_submit_flow(sid: str, inputs: Json) -> None:
         loading=False,
         message=("A2UI: Klaar. (Formulier ingediend)" if ok else "A2UI: Klaar. Corrigeer de velden en verstuur opnieuw."),
         step="done",
-        source="fallback",
-        sourceReason="deterministic_form",
+        source=ui_source,
+        sourceReason=ui_reason,
     )
