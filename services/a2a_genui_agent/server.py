@@ -598,16 +598,14 @@ async def jsonrpc(payload: Json = Body(...)):
         log.info("capability=explain_form ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
         return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
 
-if capability == "extend_form":
-    values = data.get("values") or {}
-    if not isinstance(values, dict):
-        values = {}
-    extra_fields = _fallback_form_extend_fields(query, values)
-    result = {"extra_fields": extra_fields, "ui_source": "fallback", "ui_source_reason": "deterministic_form_extend"}
-    log.info("capability=extend_form ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
-    return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
-
-
+    if capability == "extend_form":
+        values = data.get("values") or {}
+        if not isinstance(values, dict):
+            values = {}
+        extra_fields = _fallback_form_extend_fields(query, values)
+        result = {"extra_fields": extra_fields, "ui_source": "fallback", "ui_source_reason": "deterministic_form_extend"}
+        log.info("capability=extend_form ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
 
     if capability == "next_node":
         state = data.get("state") or {}
