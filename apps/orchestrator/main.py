@@ -227,9 +227,78 @@ def _sanitize_next_questions(items: Any, *, max_items: int = 8) -> List[str]:
 
 
 def _sanitize_genui_blocks(blocks: Any, *, max_blocks: int = 12) -> List[Json]:
-    """Accept only known block kinds and coerce fields to a safe shape."""
+    """Accept only known block kinds and coerce fields to a safe shape.
+
+    Notes:
+    - Accepts either a list of blocks or a single block dict.
+    - Drops unknown kinds and overlong content defensively (demo stability).
+    """
+    if isinstance(blocks, dict):
+        blocks = [blocks]
     if not isinstance(blocks, list):
         return []
+
+    def _sanitize_option(opt: Any) -> Any:
+        # Allow either string options or {label,value} objects.
+        if isinstance(opt, str):
+            return _safe_str(opt, max_len=140)
+        if isinstance(opt, dict):
+            label = _safe_str(opt.get("label") or opt.get("title") or opt.get("value") or opt.get("id") or "", max_len=140)
+            value = opt.get("value") if opt.get("value") is not None else opt.get("id")
+            value = _safe_str(value or label, max_len=140)
+            return {"label": label, "value": value}
+        return None
+
+    def _sanitize_field(f: Any) -> Optional[Json]:
+        if not isinstance(f, dict):
+            return None
+        fid = _safe_str(f.get("id") or "", max_len=40)
+        if not fid:
+            return None
+        label = _safe_str(f.get("label") or fid, max_len=120)
+        ftype = _safe_str(f.get("type") or "text", max_len=20).lower()
+        allowed_types = {"text", "email", "number", "date", "textarea", "select"}
+        if ftype not in allowed_types:
+            ftype = "text"
+
+        out: Json = {
+            "id": fid,
+            "label": label,
+            "type": ftype,
+            "required": bool(f.get("required")),
+        }
+
+        # Optional UX hints / constraints
+        if f.get("placeholder") is not None:
+            out["placeholder"] = _safe_str(f.get("placeholder"), max_len=140)
+
+        if f.get("minLength") is not None:
+            try:
+                out["minLength"] = int(f.get("minLength"))
+            except Exception:
+                pass
+        if f.get("maxLength") is not None:
+            try:
+                out["maxLength"] = int(f.get("maxLength"))
+            except Exception:
+                pass
+        if f.get("pattern") is not None:
+            out["pattern"] = _safe_str(f.get("pattern"), max_len=140)
+
+        if ftype == "select":
+            raw_opts = f.get("options") or []
+            if isinstance(raw_opts, list):
+                opts: List[str] = []
+                for o in raw_opts[:12]:
+                    if isinstance(o, str):
+                        opts.append(_safe_str(o, max_len=140))
+                    elif isinstance(o, dict):
+                        # allow {label:...} too, but store as strings for selects
+                        lbl = _safe_str(o.get("label") or o.get("value") or o.get("id") or "", max_len=140)
+                        if lbl:
+                            opts.append(lbl)
+                out["options"] = opts
+        return out
 
     out: List[Json] = []
     for b in blocks[:max_blocks]:
@@ -244,7 +313,7 @@ def _sanitize_genui_blocks(blocks: Any, *, max_blocks: int = 12) -> List[Json]:
                 {
                     "kind": "callout",
                     "title": _safe_str(b.get("title") or "Kern", max_len=140),
-                    "body": _safe_str(b.get("body") or b.get("text") or "", max_len=4000),
+                    "body": _safe_str(b.get("body") or "", max_len=2000),
                 }
             )
             continue
@@ -284,9 +353,38 @@ def _sanitize_genui_blocks(blocks: Any, *, max_blocks: int = 12) -> List[Json]:
                 {
                     "kind": "notice",
                     "title": _safe_str(b.get("title") or "Let op", max_len=140),
-                    "body": _safe_str(b.get("body") or "", max_len=1200),
+                    "body": _safe_str(b.get("body") or "", max_len=2000),
                 }
             )
+            continue
+
+        if kind == "decision":
+            q = _safe_str(b.get("question") or b.get("title") or "Kies een optie", max_len=180)
+            help_txt = _safe_str(b.get("help") or "", max_len=280)
+            raw_opts = b.get("options") or []
+            opts: List[Any] = []
+            if isinstance(raw_opts, list):
+                for o in raw_opts[:12]:
+                    so = _sanitize_option(o)
+                    if so is not None and so != "":
+                        opts.append(so)
+            out.append({"kind": "decision", "question": q, "help": help_txt, "options": opts})
+            continue
+
+        if kind == "form":
+            title = _safe_str(b.get("title") or "Gegevens", max_len=140)
+            form_id = _safe_str(b.get("formId") or b.get("form_id") or b.get("id") or "form", max_len=40)
+            submit = _safe_str(b.get("submitLabel") or b.get("submit_label") or "Verstuur", max_len=40)
+
+            raw_fields = b.get("fields") or []
+            fields: List[Json] = []
+            if isinstance(raw_fields, list):
+                for f in raw_fields[:12]:
+                    sf = _sanitize_field(f)
+                    if sf:
+                        fields.append(sf)
+
+            out.append({"kind": "form", "title": title, "formId": form_id, "fields": fields, "submitLabel": submit})
             continue
 
     return out
