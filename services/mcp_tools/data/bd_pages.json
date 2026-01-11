@@ -113,6 +113,403 @@
         "wijzigen",
         "voorwaarden"
       ]
+    },
+    {
+      "title": "Bezwaar indienen: online of per post",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/bezwaar-indienen",
+      "snippet": "Bezwaar kan vaak online via Mijn Belastingdienst. U kunt ook per post bezwaar maken. Vermeld altijd het kenmerk/aanslagnummer en uw motivatie.",
+      "keywords": [
+        "bezwaar",
+        "indienen",
+        "online",
+        "post",
+        "mijn belastingdienst",
+        "aanslagnummer",
+        "kenmerk",
+        "motivatie"
+      ]
+    },
+    {
+      "title": "Bevestiging en behandeling van uw bezwaar",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/behandeling-bezwaar",
+      "snippet": "Na ontvangst krijgt u meestal een ontvangstbevestiging. Daarna beoordelen we uw bezwaar. Soms vragen we om extra informatie of plannen we een hoorgesprek.",
+      "keywords": [
+        "bezwaar",
+        "ontvangstbevestiging",
+        "behandeling",
+        "hoorzitting",
+        "aanvullende informatie",
+        "termijn"
+      ]
+    },
+    {
+      "title": "Beroep instellen bij de rechtbank",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/beroep-rechtbank",
+      "snippet": "Bent u het niet eens met onze uitspraak op bezwaar? Dan kunt u in sommige gevallen beroep instellen bij de rechtbank. Let op de termijn en vereisten.",
+      "keywords": [
+        "beroep",
+        "rechtbank",
+        "uitspraak op bezwaar",
+        "termijn",
+        "procedureregels"
+      ]
+    },
+    {
+      "title": "Klacht indienen over de Belastingdienst",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/bezwaar-en-beroep/content/klacht-indienen",
+      "snippet": "Een klacht gaat over onze dienstverlening (bijv. communicatie of behandeling). Een klacht is iets anders dan bezwaar maken tegen een aanslag of besluit.",
+      "keywords": [
+        "klacht",
+        "dienstverlening",
+        "procedure",
+        "bezwaar vs klacht",
+        "contact"
+      ]
+    },
+    {
+      "title": "Uitstel van betaling aanvragen",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/betalen-en-ontvangen/content/uitstel-van-betaling",
+      "snippet": "Kunt u niet op tijd betalen? Vraag (waar mogelijk) uitstel van betaling aan. Soms is er direct uitstel mogelijk, soms moet u gegevens aanleveren.",
+      "keywords": [
+        "uitstel",
+        "betaling",
+        "niet op tijd",
+        "aanvragen",
+        "termijn",
+        "betalingsproblemen"
+      ]
+    },
+    {
+      "title": "Betalingsregeling aanvragen: wat heeft u nodig?",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/betalen-en-ontvangen/content/betalingsregeling-aanvragen-vereisten",
+      "snippet": "Voor een betalingsregeling vragen we vaak om informatie over uw inkomsten, vaste lasten en schulden. Zo bepalen we wat een haalbare regeling is.",
+      "keywords": [
+        "betalingsregeling",
+        "aanvragen",
+        "inkomsten",
+        "vaste lasten",
+        "schulden",
+        "bewijsstukken"
+      ]
+    },
+    {
+      "title": "Belastingrente en invorderingsrente: uitleg",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/zakelijk/content/belastingrente-invorderingsrente",
+      "snippet": "Belastingrente kan ontstaan bij (na)heffingen of te late aangifte. Invorderingsrente kan lopen als een aanslag niet op tijd wordt betaald.",
+      "keywords": [
+        "belastingrente",
+        "invorderingsrente",
+        "rente",
+        "naheffing",
+        "te laat",
+        "betalen"
+      ]
+    },
+    {
+      "title": "Mijn Belastingdienst: inloggen en berichten",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/mijn-belastingdienst/content/mijn-belastingdienst",
+      "snippet": "Via Mijn Belastingdienst kunt u onder andere aanslagen bekijken, berichten lezen en (waar beschikbaar) digitaal bezwaar indienen.",
+      "keywords": [
+        "mijn belastingdienst",
+        "inloggen",
+        "aanslag",
+        "berichten",
+        "bezwaar online",
+        "digitaal"
+      ]
+    },
+    {
+      "title": "Machtigen: iemand anders laten meelezen of regelen",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/contact/content/iemand-machtigen",
+      "snippet": "Wilt u dat iemand anders zaken voor u regelt? Dan kunt u die persoon machtigen. Dit kan per onderwerp verschillen (belastingzaken/toeslagen).",
+      "keywords": [
+        "machtigen",
+        "vertegenwoordiger",
+        "toestemming",
+        "toeslagen",
+        "belastingzaken",
+        "hulp"
+      ]
+    },
+    {
+      "title": "DigiD: nodig voor online diensten",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/contact/content/digid-nodig",
+      "snippet": "Voor veel online diensten heeft u DigiD nodig. Zonder DigiD kunt u vaak nog per post of telefoon zaken regelen, afhankelijk van het onderwerp.",
+      "keywords": [
+        "digid",
+        "online",
+        "inloggen",
+        "mijn belastingdienst",
+        "toeslagen",
+        "alternatief",
+        "post"
+      ]
+    },
+    {
+      "title": "Toeslagen: wijziging doorgeven (inkomen, huishouden, adres)",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/toeslagen/content/wijzigingen-doorgeven",
+      "snippet": "Verandert uw inkomen, huishouden of adres? Geef wijzigingen zo snel mogelijk door om te voorkomen dat u later moet terugbetalen.",
+      "keywords": [
+        "toeslagen",
+        "wijziging doorgeven",
+        "inkomen",
+        "huishouden",
+        "adres",
+        "terugbetalen",
+        "voorkomen"
+      ]
+    },
+    {
+      "title": "Toeslagen terugbetalen: hoe werkt dat?",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/toeslagen/content/terugbetalen",
+      "snippet": "Moet u toeslag terugbetalen? In Mijn toeslagen ziet u het bedrag en de betaalwijze. Soms is een betalingsregeling mogelijk.",
+      "keywords": [
+        "toeslagen",
+        "terugbetalen",
+        "betalingsregeling",
+        "mijn toeslagen",
+        "beschikking",
+        "schuld"
+      ]
+    },
+    {
+      "title": "Zorgtoeslag: kan ik zorgtoeslag krijgen?",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/zorgtoeslag/content/kan-ik-zorgtoeslag-krijgen",
+      "snippet": "Of u zorgtoeslag kunt krijgen hangt o.a. af van uw inkomen, leeftijd en of u een Nederlandse zorgverzekering hebt.",
+      "keywords": [
+        "zorgtoeslag",
+        "voorwaarden",
+        "inkomen",
+        "zorgverzekering",
+        "leeftijd",
+        "toeslagen"
+      ]
+    },
+    {
+      "title": "Zorgtoeslag: wijzigingen en stopzetten",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/zorgtoeslag/content/wijzigingen-stopzetten",
+      "snippet": "Verandert uw inkomen of situatie? Pas uw zorgtoeslag aan. Stopzetten kan ook, bijvoorbeeld als u geen recht meer hebt.",
+      "keywords": [
+        "zorgtoeslag",
+        "wijzigingen",
+        "stopzetten",
+        "inkomen",
+        "situatie",
+        "recht"
+      ]
+    },
+    {
+      "title": "Kinderopvangtoeslag: aanvraag en voorwaarden",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/kinderopvangtoeslag/content/aanvragen-voorwaarden",
+      "snippet": "Kinderopvangtoeslag is een bijdrage in de kosten van kinderopvang. U moet voldoen aan voorwaarden (o.a. werk/opleiding, opvang bij geregistreerde opvang).",
+      "keywords": [
+        "kinderopvangtoeslag",
+        "aanvragen",
+        "voorwaarden",
+        "opvang",
+        "registratie",
+        "werk",
+        "opleiding"
+      ]
+    },
+    {
+      "title": "Kindgebonden budget: wanneer heeft u recht?",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/kindgebonden-budget/content/wanneer-recht",
+      "snippet": "Het kindgebonden budget is een bijdrage voor ouders. Of u er recht op hebt hangt o.a. af van inkomen en gezinssamenstelling.",
+      "keywords": [
+        "kindgebonden budget",
+        "recht",
+        "inkomen",
+        "gezin",
+        "ouders",
+        "toeslagen"
+      ]
+    },
+    {
+      "title": "Toeslagpartner: wie is mijn toeslagpartner?",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/toeslagen/content/toeslagpartner",
+      "snippet": "Uw toeslagpartner kan invloed hebben op uw toeslag. In veel situaties bent u toeslagpartners door samenwonen, trouwen of een kind samen.",
+      "keywords": [
+        "toeslagpartner",
+        "samenwonen",
+        "trouwen",
+        "kind",
+        "invloed",
+        "inkomen",
+        "toeslagen"
+      ]
+    },
+    {
+      "title": "Proefberekening toeslagen",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/toeslagen/content/proefberekening",
+      "snippet": "Met een proefberekening krijgt u een indicatie of u recht hebt op toeslag en hoe hoog deze ongeveer kan zijn.",
+      "keywords": [
+        "proefberekening",
+        "toeslagen",
+        "indicatie",
+        "recht",
+        "hoogte",
+        "inkomen"
+      ]
+    },
+    {
+      "title": "Inkomstenbelasting: aangifte doen",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/inkomstenbelasting/content/aangifte-doen",
+      "snippet": "Aangifte inkomstenbelasting doet u meestal digitaal. Let op de aangiftetermijn en controleer uw gegevens voordat u verzendt.",
+      "keywords": [
+        "inkomstenbelasting",
+        "aangifte",
+        "digitaal",
+        "termijn",
+        "controle",
+        "verzenden"
+      ]
+    },
+    {
+      "title": "Voorlopige aanslag: aanvragen of wijzigen",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/inkomstenbelasting/content/voorlopige-aanslag-aanvragen-wijzigen",
+      "snippet": "Met een voorlopige aanslag betaalt u belasting alvast vooruit of krijgt u een voorlopige teruggaaf. U kunt de voorlopige aanslag later aanpassen.",
+      "keywords": [
+        "voorlopige aanslag",
+        "aanvragen",
+        "wijzigen",
+        "teruggaaf",
+        "vooruitbetalen",
+        "inkomstenbelasting"
+      ]
+    },
+    {
+      "title": "Belastingaanslag: uitleg aanslagbiljet en kenmerk",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/betalen-en-ontvangen/content/uitleg-aanslagbiljet",
+      "snippet": "Op het aanslagbiljet staat het bedrag, de betaaltermijn en het kenmerk/aanslagnummer. Bewaar dit kenmerk voor contact of bezwaar.",
+      "keywords": [
+        "aanslagbiljet",
+        "aanslagnummer",
+        "kenmerk",
+        "betaaltermijn",
+        "bedrag",
+        "bezwaar"
+      ]
+    },
+    {
+      "title": "BTW: aangifte doen (ondernemers)",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/btw-aangifte-doen",
+      "snippet": "Als ondernemer doet u btw-aangifte per tijdvak. Zorg dat uw administratie op orde is en dien op tijd in om boetes/rente te voorkomen.",
+      "keywords": [
+        "btw",
+        "aangifte",
+        "ondernemer",
+        "tijdvak",
+        "administratie",
+        "op tijd",
+        "boete"
+      ]
+    },
+    {
+      "title": "Suppletie btw: fouten herstellen",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/suppletie-btw",
+      "snippet": "Heeft u een fout ontdekt in een eerdere btw-aangifte? Dan kunt u dit herstellen met een suppletie. Hoe u dit doet hangt af van het bedrag.",
+      "keywords": [
+        "suppletie",
+        "btw",
+        "fout",
+        "herstellen",
+        "eerdere aangifte",
+        "corrigeren"
+      ]
+    },
+    {
+      "title": "Loonheffingen: aangifte en betalen",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/loonheffingen/content/loonheffingen-aangifte-betalen",
+      "snippet": "Werkgevers doen loonheffingen-aangifte en betalen de afgedragen bedragen per tijdvak. Dien op tijd in en betaal op tijd om problemen te voorkomen.",
+      "keywords": [
+        "loonheffingen",
+        "aangifte",
+        "werkgever",
+        "tijdvak",
+        "betalen",
+        "op tijd"
+      ]
+    },
+    {
+      "title": "Kleineondernemersregeling (KOR)",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/btw/content/kor-kleineondernemersregeling",
+      "snippet": "De KOR is een vrijstelling voor btw voor kleine ondernemers. U moet zich aanmelden en voldoen aan voorwaarden. Let op gevolgen voor aftrek btw.",
+      "keywords": [
+        "kor",
+        "kleineondernemersregeling",
+        "btw",
+        "vrijstelling",
+        "aanmelden",
+        "voorwaarden",
+        "aftrek"
+      ]
+    },
+    {
+      "title": "Erfbelasting: aangifte en betalen",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/erfbelasting/content/erfbelasting-aangifte",
+      "snippet": "Bij een erfenis kan erfbelasting gelden. U (of de executeur) doet aangifte binnen de termijn. Er zijn vrijstellingen en tarieven.",
+      "keywords": [
+        "erfbelasting",
+        "erfenis",
+        "aangifte",
+        "executeur",
+        "termijn",
+        "vrijstelling",
+        "tarief"
+      ]
+    },
+    {
+      "title": "Schenkbelasting: wanneer aangifte doen?",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/schenkbelasting/content/schenkbelasting-aangifte",
+      "snippet": "Ontvangt u een schenking? Dan kan schenkbelasting gelden. Of u aangifte moet doen hangt af van het bedrag en vrijstellingen.",
+      "keywords": [
+        "schenkbelasting",
+        "schenking",
+        "aangifte",
+        "vrijstelling",
+        "bedrag",
+        "tarief"
+      ]
+    },
+    {
+      "title": "Boete voorkomen: op tijd aangifte doen en betalen",
+      "url": "https://www.belastingdienst.nl/wps/wcm/connect/nl/betalen-en-ontvangen/content/boete-voorkomen",
+      "snippet": "Te laat aangifte doen of betalen kan leiden tot een boete. Check deadlines en vraag tijdig uitstel als dat nodig is.",
+      "keywords": [
+        "boete",
+        "te laat",
+        "aangifte",
+        "betalen",
+        "deadline",
+        "uitstel"
+      ]
+    },
+    {
+      "title": "Mijn toeslagen: overzicht en beschikkingen",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/toeslagen/content/mijn-toeslagen",
+      "snippet": "In Mijn toeslagen ziet u uw aanvragen, voorschotten en beschikkingen. U kunt hier ook wijzigingen doorgeven en berichten bekijken.",
+      "keywords": [
+        "mijn toeslagen",
+        "beschikking",
+        "voorschot",
+        "wijzigen",
+        "aanvragen",
+        "berichten"
+      ]
+    },
+    {
+      "title": "Huurtoeslag: wijzigingen doorgeven",
+      "url": "https://www.toeslagen.nl/wps/wcm/connect/nl/huurtoeslag/content/wijzigingen-doorgeven",
+      "snippet": "Verandert uw huur, inkomen of huishouden? Geef wijzigingen door om de juiste huurtoeslag te ontvangen en terugbetalingen te voorkomen.",
+      "keywords": [
+        "huurtoeslag",
+        "wijziging",
+        "huur",
+        "inkomen",
+        "huishouden",
+        "terugbetalen"
+      ]
     }
   ]
 }
