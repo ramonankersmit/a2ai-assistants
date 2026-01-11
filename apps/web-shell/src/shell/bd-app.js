@@ -26,6 +26,8 @@ export class BdApp extends LitElement {
 
     this.statusHistory = [];
     this.statusCollapsed = false;
+    this._pendingGenuiQuery = '';
+    this._pendingGenuiAutoSearch = false;
   }
 
   createRenderRoot() { return this; }
@@ -39,6 +41,28 @@ export class BdApp extends LitElement {
     super.disconnectedCallback();
     if (this._es) this._es.close();
   }
+
+
+updated(changed) {
+  // When we navigate to GenUI Search from another surface (e.g., Wizard next_questions),
+  // prefill the search query input and optionally auto-run the search.
+  if (changed.has('surfaceId') && this.surfaceId === 'genui_search' && this._pendingGenuiQuery) {
+    const q = String(this._pendingGenuiQuery || '').trim();
+    const doSearch = !!this._pendingGenuiAutoSearch;
+
+    // clear first to avoid loops
+    this._pendingGenuiQuery = '';
+    this._pendingGenuiAutoSearch = false;
+
+    setTimeout(() => {
+      const input = this.renderRoot.querySelector('#genuiQuery');
+      if (input) input.value = q;
+      if (doSearch && q) {
+        this._sendClientEvent('genui_search', 'genui/search', { query: q });
+      }
+    }, 0);
+  }
+}
 
   _connectSSE() {
     this._es = new EventSource(`${ORCH_BASE}/events`);
@@ -627,7 +651,16 @@ export class BdApp extends LitElement {
               <div class="small-muted">Klik om direct opnieuw te zoeken.</div>
               <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
                 ${items.map(q => html`
-                  <button class="pill" style="cursor:pointer;" @click=${() => this._genuiQuickSearch(String(q || ''))}>
+                  <button class="pill" style="cursor:pointer;" @click=${() => this.
+
+_navToGenuiSearchWithQuery(query, autoSearch = true) {
+  const q = String(query || '').trim();
+  if (!q) return;
+  this._pendingGenuiQuery = q;
+  this._pendingGenuiAutoSearch = !!autoSearch;
+  this._nav('genui_search');
+}
+_genuiQuickSearch(String(q || ''))}>
                     ${q}
                   </button>
                 `)}
