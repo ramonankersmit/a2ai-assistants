@@ -480,6 +480,10 @@ _renderHome() {
     if (jaarEl) jaarEl.value = '2025';
     if (situatieEl) situatieEl.value = 'Alleenstaand';
     if (lovEl) lovEl.checked = true;
+
+    // Reset server-side surface state (clear results/status)
+    this._sendClientEvent('toeslagen', 'toeslagen/reset', {});
+
   }
 
   _toeslagenCheck() {
