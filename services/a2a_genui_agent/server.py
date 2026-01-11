@@ -44,7 +44,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice"}
+_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice", "decision"}
 
 
 @app.on_event("startup")
@@ -61,7 +61,7 @@ async def agent_card():
         "name": "genui-agent",
         "description": "Composes UI blocks (A2UI-friendly) from search results (Gemini or fallback).",
         "url": "http://localhost:8030/",
-        "capabilities": ["compose_ui"],
+        "capabilities": ["compose_ui", "next_node"],
         "protocol": "a2a-jsonrpc",
         "version": "0.1.6",
     }
@@ -93,6 +93,118 @@ def _fallback_blocks(query: str, citations: List[Json]) -> List[Json]:
         {"kind": "next_questions", "title": "Vervolgvraag", "items": next_q},
         {"kind": "notice", "title": "Let op", "body": "Dit is demo-informatie. Raadpleeg officiële pagina’s voor actuele details."},
     ]
+
+
+
+# -----------------------
+# Decision Tree Wizard (deterministic, no Gemini dependency)
+# -----------------------
+
+def _tree_decision(title: str, question: str, options: List[str]) -> Json:
+    return {"kind": "decision", "title": title, "question": question, "options": options}
+
+
+def _tree_leaf_blocks(topic: str, path: List[str]) -> List[Json]:
+    # Generic leaf: short guidance + FAQ + next questions.
+    p = " → ".join([x for x in path if x]) if path else topic
+
+    callout = {
+        "kind": "callout",
+        "title": "Advies (demo)",
+        "body": (
+            f"Onderwerp: {p}\n\n"
+            "1) Check de relevante pagina’s (zie Bronnen).\n"
+            "2) Noteer kenmerk/aanslagnummer en uw vraag.\n"
+            "3) Kies de juiste route: bezwaar, betalen, toeslagen of contact."
+        ),
+    }
+
+    faq = [
+        {"q": "Is dit een besluit of bindend advies?", "a": "Nee. Dit is een demo die laat zien hoe UI-blokken dynamisch worden opgebouwd."},
+        {"q": "Waar haal ik de officiële informatie?", "a": "Gebruik de Bronnen (MCP) en raadpleeg de officiële pagina’s."},
+    ]
+
+    next_q = [
+        "Wat is de termijn en wat moet ik meesturen?",
+        "Kan ik dit online regelen via Mijn Belastingdienst?",
+        "Welke vervolgstap past bij mijn situatie?",
+    ]
+
+    return [
+        callout,
+        {"kind": "accordion", "title": "Veelgestelde vragen", "items": faq},
+        {"kind": "next_questions", "title": "Vervolgvraag", "items": next_q},
+        {"kind": "notice", "title": "Let op", "body": "Demo-informatie. Geen persoonsgegevens. Raadpleeg officiële pagina’s voor actuele details."},
+    ]
+
+
+def _tree_next_node(state: Json, choice: str) -> Tuple[Json, List[Json]]:
+    node = str(state.get("node") or "root")
+    path_in = state.get("path") or []
+    path: List[str] = [str(x) for x in path_in if str(x).strip()]
+
+    if choice:
+        path.append(choice)
+
+    c = (choice or "").strip().lower()
+
+    # Root choice
+    if node == "root":
+        if "bezwaar" in c:
+            new_state = {"node": "bezwaar_type", "path": path}
+            blocks = [
+                _tree_decision("Stap 2", "Waar gaat het bezwaar over?", ["Aanslag/naheffing", "Boete", "Toeslagbeschikking", "Anders"]),
+            ]
+            return new_state, blocks
+        if "betal" in c:
+            new_state = {"node": "betalen_type", "path": path}
+            blocks = [
+                _tree_decision("Stap 2", "Waar gaat het over?", ["Niet op tijd betalen", "Betalingsregeling", "Rente/boete", "Anders"]),
+            ]
+            return new_state, blocks
+        if "toeslag" in c:
+            new_state = {"node": "toeslagen_type", "path": path}
+            blocks = [
+                _tree_decision("Stap 2", "Welke toeslag of actie?", ["Huurtoeslag", "Zorgtoeslag", "Kinderopvangtoeslag", "Wijziging doorgeven", "Terugbetalen"]),
+            ]
+            return new_state, blocks
+        if "contact" in c:
+            new_state = {"node": "done", "path": path}
+            return new_state, _tree_leaf_blocks("Contact", path)
+
+        new_state = {"node": "done", "path": path}
+        return new_state, _tree_leaf_blocks("Algemeen", path)
+
+    # Second level choices -> one more decision then leaf
+    if node == "bezwaar_type":
+        new_state = {"node": "bezwaar_indienen", "path": path}
+        blocks = [
+            _tree_decision("Stap 3", "Hoe wilt u bezwaar indienen?", ["Online", "Per post", "Weet ik niet"]),
+        ]
+        return new_state, blocks
+
+    if node == "bezwaar_indienen":
+        new_state = {"node": "done", "path": path}
+        return new_state, _tree_leaf_blocks("Bezwaar", path)
+
+    if node == "betalen_type":
+        new_state = {"node": "betalen_actie", "path": path}
+        blocks = [
+            _tree_decision("Stap 3", "Wat wilt u nu doen?", ["Uitstel aanvragen", "Betalingsregeling aanvragen", "Uitleg over rente", "Weet ik niet"]),
+        ]
+        return new_state, blocks
+
+    if node == "betalen_actie":
+        new_state = {"node": "done", "path": path}
+        return new_state, _tree_leaf_blocks("Betalen", path)
+
+    if node == "toeslagen_type":
+        new_state = {"node": "done", "path": path}
+        return new_state, _tree_leaf_blocks("Toeslagen", path)
+
+    # Default: finish
+    new_state = {"node": "done", "path": path}
+    return new_state, _tree_leaf_blocks("Algemeen", path)
 
 
 def _system_instruction() -> str:
@@ -172,6 +284,22 @@ def _shape_blocks(obj: Json, citations: List[Json]) -> Optional[List[Json]]:
             "next_questions": "Vervolgvraag",
             "notice": "Let op",
         }.get(kind, "Blok")
+
+
+        if kind == "decision":
+            question = str(b.get("question") or b.get("q") or "").strip() or "Kies een optie"
+            raw_opts = b.get("options") if isinstance(b.get("options"), list) else (b.get("items") if isinstance(b.get("items"), list) else [])
+            opts: List[str] = []
+            for it in raw_opts[:8]:
+                if isinstance(it, dict):
+                    lab = str(it.get("label") or it.get("text") or it.get("value") or "").strip()
+                else:
+                    lab = str(it).strip()
+                if lab:
+                    opts.append(lab)
+            if opts:
+                out.append({"kind": "decision", "title": title, "question": question, "options": opts})
+            continue
 
         if kind == "citations":
             out.append({"kind": "citations", "title": title, "items": citations})
@@ -336,7 +464,7 @@ async def jsonrpc(payload: Json = Body(...)):
 
     params = payload.get("params") or {}
     capability = params.get("capability")
-    if capability != "compose_ui":
+    if capability not in ("compose_ui", "next_node"):
         return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "Unknown capability"}}
 
     message = (params.get("message") or {})
@@ -348,6 +476,17 @@ async def jsonrpc(payload: Json = Body(...)):
     citations = data.get("citations") or []
     if not isinstance(citations, list):
         citations = []
+
+    if capability == "next_node":
+        state = data.get("state") or {}
+        if not isinstance(state, dict):
+            state = {}
+        choice = str(data.get("choice") or "").strip()
+        new_state, blocks = _tree_next_node(state, choice)
+        result = {"blocks": blocks, "ui_source": "fallback", "ui_source_reason": "deterministic_tree", "tree": new_state}
+        log.info("capability=next_node ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
+
 
     blocks, reason = await _gemini_compose(query, citations)
     if blocks:

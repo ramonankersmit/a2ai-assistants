@@ -155,7 +155,7 @@ async def _a2a_call_with_trace(
 # GenUI: defensive block validation (whitelist)
 # -----------------------
 
-GENUI_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice"}
+GENUI_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice", "decision"}
 
 
 def _safe_str(value: Any, *, max_len: int = 4000) -> str:
@@ -209,6 +209,19 @@ def _sanitize_next_questions(items: Any, *, max_items: int = 8) -> List[str]:
     return out
 
 
+def _sanitize_decision_options(options: Any, *, max_items: int = 6) -> List[str]:
+    out: List[str] = []
+    if isinstance(options, list):
+        for it in options[:max_items]:
+            if isinstance(it, dict):
+                label = _safe_str(it.get("label") or it.get("text") or it.get("value") or "", max_len=80)
+            else:
+                label = _safe_str(it, max_len=80)
+            if label:
+                out.append(label)
+    return out
+
+
 def _sanitize_genui_blocks(blocks: Any, *, max_blocks: int = 12) -> List[Json]:
     """Accept only known block kinds and coerce fields to a safe shape."""
     if not isinstance(blocks, list):
@@ -258,6 +271,18 @@ def _sanitize_genui_blocks(blocks: Any, *, max_blocks: int = 12) -> List[Json]:
                     "kind": "next_questions",
                     "title": _safe_str(b.get("title") or "Vervolgvraag", max_len=140),
                     "items": _sanitize_next_questions(b.get("items") or []),
+                }
+            )
+            continue
+
+
+        if kind == "decision":
+            out.append(
+                {
+                    "kind": "decision",
+                    "title": _safe_str(b.get("title") or "Keuze", max_len=140),
+                    "question": _safe_str(b.get("question") or b.get("q") or "Kies een optie", max_len=240),
+                    "options": _sanitize_decision_options(b.get("options") or b.get("items") or []),
                 }
             )
             continue
@@ -320,6 +345,9 @@ async def client_event(payload: Json = Body(...)):
             await _send_open_surface(sid, "bezwaar", "Bezwaar Assistent", _empty_surface_model("A2UI: Plak een bezwaarbrief en klik op Analyseer."))
         elif target == "genui_search":
             await _send_open_surface(sid, "genui_search", "Generatieve UI — Zoeken", _empty_surface_model("A2UI: Stel een vraag en klik op Zoek."))
+        elif target == "genui_tree":
+            await _send_open_surface(sid, "genui_tree", "Generatieve UI — Wizard", _empty_surface_model("A2UI: Start de wizard…"))
+            asyncio.create_task(run_genui_tree_start_flow(sid, {}))
         else:
             await _send_open_surface(sid, "home", "Belastingdienst Assistants", _home_surface_model())
         return {"ok": True}
@@ -334,6 +362,14 @@ async def client_event(payload: Json = Body(...)):
 
     if name == "genui/search":
         asyncio.create_task(run_genui_search_flow(sid, data))
+        return {"ok": True}
+
+    if name == "genui_tree/start":
+        asyncio.create_task(run_genui_tree_start_flow(sid, data))
+        return {"ok": True}
+
+    if name == "genui_tree/choose":
+        asyncio.create_task(run_genui_tree_choose_flow(sid, data))
         return {"ok": True}
 
     return {"ok": True, "ignored": True}
@@ -527,3 +563,181 @@ async def run_genui_search_flow(sid: str, inputs: Json) -> None:
         await _set_results(sid, surface_id, merged)
 
         await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (GenUI fallback)", step="done")
+
+
+# -----------------------
+# Flow 4: GenUI Wizard (Decision Tree) — deterministic A2A (next_node) + MCP citations
+# -----------------------
+
+def _tree_default_state() -> Json:
+    return {"node": "root", "path": []}
+
+
+async def _set_tree_state(sid: str, surface_id: str, state: Json) -> None:
+    await hub.push_update_and_apply(sid, surface_id, [{"op": "replace", "path": "/tree", "value": state}])
+
+
+def _tree_query_from_state(state: Json, choice: str) -> str:
+    # Derive a deterministic query for bd_search based on the path + current choice.
+    parts: List[str] = []
+    for p in (state.get("path") or []):
+        if p:
+            parts.append(str(p))
+    if choice:
+        parts.append(choice)
+
+    q = " ".join(parts).strip()
+    q_low = q.lower()
+
+    # Light boosts for better hits in the curated dataset
+    if "bezwaar" in q_low:
+        q = f"{q} bezwaar indienen termijn"
+    if "betal" in q_low or "uitstel" in q_low:
+        q = f"{q} uitstel betalingsregeling"
+    if "toeslag" in q_low:
+        q = f"{q} toeslagen wijzigen terugbetalen"
+    if not q:
+        q = "bezwaar betalen toeslagen"
+
+    return q
+
+
+async def run_genui_tree_start_flow(sid: str, inputs: Json) -> None:
+    surface_id = "genui_tree"
+
+    # Do not depend on Gemini; start always deterministic.
+    await _send_open_surface(sid, surface_id, "Generatieve UI — Wizard", _empty_surface_model("A2UI: Wizard gestart."))
+    await _sleep_tick()
+
+    state = _tree_default_state()
+    await _set_tree_state(sid, surface_id, state)
+
+    await _set_status(
+        sid,
+        surface_id,
+        loading=True,
+        message="A2UI: Wizard laden…",
+        step="tree_start",
+        source="fallback",
+        sourceReason="deterministic_tree",
+    )
+    await _set_results(sid, surface_id, [])
+    await _sleep_tick()
+
+    blocks: List[Json] = [
+        {
+            "kind": "callout",
+            "title": "Wizard (demo)",
+            "body": "Beantwoord een paar korte vragen. Op basis daarvan tonen we relevante info en vervolgstappen (demo, geen besluit).",
+        },
+        {
+            "kind": "decision",
+            "title": "Stap 1",
+            "question": "Waar gaat uw vraag over?",
+            "options": ["Bezwaar maken", "Betalen", "Toeslagen", "Contact", "Anders"],
+        },
+    ]
+
+    await _set_results(sid, surface_id, blocks)
+    await _set_status(sid, surface_id, loading=False, message="A2UI: Kies een optie om door te gaan.", step="waiting")
+
+
+async def run_genui_tree_choose_flow(sid: str, inputs: Json) -> None:
+    surface_id = "genui_tree"
+    choice = _safe_str(inputs.get("option") or inputs.get("choice") or inputs.get("value") or "", max_len=120)
+    if not choice:
+        return
+
+    s = await hub.get(sid)
+    if not s:
+        return
+    model = s.get_model(surface_id) if s else {}
+    state = model.get("tree") if isinstance(model, dict) else None
+    if not isinstance(state, dict):
+        state = _tree_default_state()
+
+    await _set_status(sid, surface_id, loading=True, message=f"A2UI: Keuze ontvangen: {choice}", step="tree_choose")
+    await _sleep_tick()
+
+    # 1) MCP citations for this step (deterministic)
+    query = _tree_query_from_state(state, choice)
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Bronnen ophalen (MCP)…", step="bd_search")
+    await _sleep_tick()
+
+    search_resp = await _mcp_call_with_trace(sid, surface_id, "bd_search", {"query": query, "k": 5}, step="bd_search")
+    citations = search_resp.get("items", []) if isinstance(search_resp, dict) else []
+    citations_block: Json = {"kind": "citations", "title": "Bronnen (MCP)", "items": citations}
+
+    # Progressive: show citations first
+    await _set_results(sid, surface_id, [citations_block] if citations else [])
+    await _sleep_tick()
+
+    # 2) A2A decision step (deterministic fallback inside the GenUI agent)
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Volgende stap bepalen (A2A)…", step="next_node")
+    await _sleep_tick()
+
+    try:
+        ui_raw = await _a2a_call_with_trace(
+            sid,
+            surface_id,
+            a2a_genui,
+            "next_node",
+            {"state": state, "choice": choice, "citations": citations},
+            step="next_node",
+        )
+
+        ui_data = ui_raw.get("data") if isinstance(ui_raw, dict) and isinstance(ui_raw.get("data"), dict) else ui_raw
+        if not isinstance(ui_data, dict):
+            ui_data = {}
+
+        blocks_raw = ui_data.get("blocks", [])
+        blocks = _sanitize_genui_blocks(blocks_raw)
+
+        # Prefer citations from MCP only
+        blocks = [b for b in blocks if b.get("kind") != "citations"]
+
+        ui_source = _safe_str(ui_data.get("ui_source", "fallback"), max_len=40).lower()
+        if ui_source not in ("gemini", "fallback"):
+            ui_source = "fallback"
+        ui_reason = _safe_str(ui_data.get("ui_source_reason", "deterministic_tree"), max_len=80)
+
+        new_state = ui_data.get("tree")
+        if isinstance(new_state, dict):
+            await _set_tree_state(sid, surface_id, new_state)
+
+        await _set_status(sid, surface_id, source=ui_source, sourceReason=ui_reason)
+
+        merged: List[Json] = []
+        if citations:
+            merged.append(citations_block)
+        merged.extend(blocks)
+
+        if not blocks:
+            merged.append({"kind": "notice", "title": "Wizard", "body": "Geen blokken ontvangen; alleen bronnen getoond (demo)."})
+        await _set_results(sid, surface_id, merged)
+
+        has_decision = any(b.get("kind") == "decision" for b in merged)
+        await _set_status(
+            sid,
+            surface_id,
+            loading=False,
+            message="A2UI: Kies een optie om door te gaan." if has_decision else "A2UI: Klaar. (wizard, demo)",
+            step="waiting" if has_decision else "done",
+        )
+    except Exception:
+        await _set_status(sid, surface_id, source="fallback", sourceReason="a2a_down_or_error")
+
+        merged: List[Json] = []
+        if citations:
+            merged.append(citations_block)
+        merged.append({"kind": "notice", "title": "Wizard", "body": "A2A genui-agent niet bereikbaar; wizard valt terug op start."})
+        merged.append(
+            {
+                "kind": "decision",
+                "title": "Stap 1",
+                "question": "Waar gaat uw vraag over?",
+                "options": ["Bezwaar maken", "Betalen", "Toeslagen", "Contact", "Anders"],
+            }
+        )
+        await _set_results(sid, surface_id, merged)
+        await _set_status(sid, surface_id, loading=False, message="A2UI: Kies een optie om door te gaan.", step="waiting")

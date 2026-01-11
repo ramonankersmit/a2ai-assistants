@@ -181,6 +181,17 @@ export class BdApp extends LitElement {
               <button class="btn" @click=${() => this._nav('genui_search')}>Start</button>
             </div>
           </div>
+
+
+          <!-- Idee 3: Decision Tree Wizard -->
+          <div class="card tile">
+            <div class="card-title">Generatieve UI — Wizard</div>
+            <div class="tile-icon">🧭</div>
+            <div class="card-sub">Doorloop een korte beslisboom (demo)<br/>met klikbare keuzes en vervolgstappen.</div>
+            <div style="padding-bottom:22px;">
+              <button class="btn" @click=${() => this._nav('genui_tree')}>Start</button>
+            </div>
+          </div>
         </div>
       </div>
     `;
@@ -625,6 +636,25 @@ export class BdApp extends LitElement {
           </div>
         `;
       }
+      if (kind === 'decision') {
+        const opts = Array.isArray(b.options) ? b.options : [];
+        const question = String(b.question || '').trim();
+        return html`
+          <div class="card" style="margin-top:14px;">
+            <div class="card-body">
+              <div class="section-title" style="margin-top:0;">${b.title || 'Keuze'}</div>
+              <div style="margin-top:6px;"><b>${question}</b></div>
+              <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
+                ${opts.map(opt => html`
+                  <button class="pill" style="cursor:pointer;" @click=${() => this._genuiTreeChoose(String(opt || ''))}>
+                    ${opt}
+                  </button>
+                `)}
+              </div>
+            </div>
+          </div>
+        `;
+      }
       if (kind === 'notice') {
         return html`
           <div class="status" style="margin-top:14px;">
@@ -662,6 +692,21 @@ export class BdApp extends LitElement {
     this._sendClientEvent('genui_search', 'genui/search', { query });
   }
 
+
+  _genuiTreeStart() {
+    const loading = !!getByPointer(this.model, '/status/loading');
+    if (loading) return;
+    this._sendClientEvent('genui_tree', 'genui_tree/start', {});
+  }
+
+  _genuiTreeChoose(option) {
+    const loading = !!getByPointer(this.model, '/status/loading');
+    if (loading) return;
+    const opt = String(option || '').trim();
+    if (!opt) return;
+    this._sendClientEvent('genui_tree', 'genui_tree/choose', { option: opt });
+  }
+
   _humanizeGenuiSourceReason(reasonRaw) {
     const raw = String(reasonRaw || '').trim();
     if (!raw) return { label: '', code: '' };
@@ -680,6 +725,9 @@ export class BdApp extends LitElement {
     }
     if (r === 'a2a_down_or_error' || r.includes('a2a_down_or_error')) {
       return { code: 'a2a_down_or_error', label: 'GenUI-agent niet bereikbaar' };
+    }
+    if (r === 'deterministic_tree' || r.includes('deterministic_tree')) {
+      return { code: 'deterministic_tree', label: 'Deterministische wizard' };
     }
 
     // Default: show as-is (kept for future reason codes).
@@ -748,6 +796,44 @@ _renderGenuiSearch() {
     `;
   }
 
+  _renderGenuiTree() {
+    const loading = !!getByPointer(this.model, '/status/loading');
+    const blocks = (getByPointer(this.model, '/results') || []);
+    const hasBlocks = Array.isArray(blocks) && blocks.length;
+
+    return html`
+      <div class="container">
+        <div class="topbar">
+          <button class="link" @click=${() => this._nav('home')}>← Terug</button>
+          <div class="small-muted">${this.connected ? 'Verbonden' : 'Niet verbonden'}</div>
+        </div>
+
+        <div class="card">
+          <div class="header" style="height:64px;border-radius:14px 14px 0 0;">
+            <div class="header-left">
+              <div class="logo">${logoSvg}</div>
+              <div style="font-size:26px;font-weight:650;">Generatieve UI — Wizard</div>
+            </div>
+            <div class="hamburger">${menuSvg}</div>
+          </div>
+
+          <div class="card-body">
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+              <button class="btn" style="min-width:170px;" ?disabled=${loading} @click=${this._genuiTreeStart}>Opnieuw starten</button>
+            </div>
+
+            ${this._renderStatus()}
+
+            ${this._renderGenuiSourcePill()}
+
+            ${hasBlocks ? this._renderBlocks(blocks) : html`<div class="small-muted">Nog geen output. Klik op “Opnieuw starten”.</div>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+
   render() {
     return html`
       <div class="shell">
@@ -757,6 +843,7 @@ _renderGenuiSearch() {
           ${this.surfaceId === 'toeslagen' ? this._renderToeslagen() : ''}
           ${this.surfaceId === 'bezwaar' ? this._renderBezwaar() : ''}
           ${this.surfaceId === 'genui_search' ? this._renderGenuiSearch() : ''}
+          ${this.surfaceId === 'genui_tree' ? this._renderGenuiTree() : ''}
         </div>
       </div>
     `;
