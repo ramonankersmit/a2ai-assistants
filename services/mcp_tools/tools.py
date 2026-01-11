@@ -194,3 +194,113 @@ def policy_snippets(case_type: Optional[str]) -> Dict[str, Any]:
             "Check ontvankelijkheid, termijnen en gevraagde stukken (demo).",
         ]
     return {"snippets": snippets}
+
+def validate_form(schema: List[Dict[str, Any]], values: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deterministic generic form validation (demo).
+
+    Inputs:
+      - schema: list of field definitions (id, type, required, pattern, min/max, minLength/maxLength)
+      - values: dict with submitted values
+
+    Output:
+      - ok: bool
+      - errors: list[{field, message}]
+    """
+    if not isinstance(schema, list):
+        schema = []
+    if not isinstance(values, dict):
+        values = {}
+
+    errors: List[Dict[str, str]] = []
+
+    email_re = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+    date_formats = ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y"]
+
+    for f in schema[:20]:
+        if not isinstance(f, dict):
+            continue
+        fid = str(f.get("id") or "").strip()
+        if not fid:
+            continue
+
+        label = str(f.get("label") or fid).strip()
+        required = bool(f.get("required", False))
+        ftype = str(f.get("type") or "text").strip().lower()
+
+        raw = values.get(fid, "")
+        s = "" if raw is None else str(raw).strip()
+
+        if required and not s:
+            errors.append({"field": fid, "message": f"'{label}' is verplicht."})
+            continue
+
+        if not s:
+            continue
+
+        if ftype == "email":
+            if not email_re.match(s):
+                errors.append({"field": fid, "message": f"'{label}' is geen geldig e-mailadres."})
+                continue
+
+        if ftype == "number":
+            try:
+                float(s.replace(",", "."))
+            except Exception:
+                errors.append({"field": fid, "message": f"'{label}' moet een getal zijn."})
+                continue
+
+        if ftype == "date":
+            ok_date = False
+            for fmt in date_formats:
+                try:
+                    datetime.strptime(s, fmt)
+                    ok_date = True
+                    break
+                except Exception:
+                    pass
+            if not ok_date:
+                errors.append({"field": fid, "message": f"'{label}' heeft geen geldige datum (bijv. YYYY-MM-DD)."})
+                continue
+
+        pat = f.get("pattern")
+        if isinstance(pat, str) and pat.strip():
+            try:
+                if not re.search(pat, s):
+                    errors.append({"field": fid, "message": f"'{label}' heeft een ongeldige waarde."})
+                    continue
+            except re.error:
+                pass
+
+        min_len = f.get("minLength")
+        max_len = f.get("maxLength")
+        try:
+            if min_len is not None and int(min_len) > 0 and len(s) < int(min_len):
+                errors.append({"field": fid, "message": f"'{label}' is te kort."})
+        except Exception:
+            pass
+        try:
+            if max_len is not None and int(max_len) > 0 and len(s) > int(max_len):
+                errors.append({"field": fid, "message": f"'{label}' is te lang."})
+        except Exception:
+            pass
+
+        if ftype == "number":
+            try:
+                num = float(s.replace(",", "."))
+                if f.get("min") is not None:
+                    try:
+                        if num < float(f.get("min")):
+                            errors.append({"field": fid, "message": f"'{label}' is lager dan toegestaan."})
+                    except Exception:
+                        pass
+                if f.get("max") is not None:
+                    try:
+                        if num > float(f.get("max")):
+                            errors.append({"field": fid, "message": f"'{label}' is hoger dan toegestaan."})
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+    return {"ok": len(errors) == 0, "errors": errors}

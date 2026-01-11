@@ -31,6 +31,7 @@ from .tools import (
     policy_snippets,
     risk_notes,
     rules_lookup,
+    validate_form,
 )
 
 # ✅ NEW (Idea 1 step 1.2): curated deterministic search tool
@@ -96,7 +97,12 @@ async def _call_tool(tool_name: str, arguments: Dict[str, Any]) -> Any:
     if tool_name == "policy_snippets":
         return policy_snippets(arguments.get("type"))
 
-    # ✅ NEW
+    if tool_name == "validate_form":
+        schema = arguments.get("schema") or []
+        values = arguments.get("values") or {}
+        return validate_form(schema, values)
+
+# ✅ NEW
     if tool_name == "bd_search":
         query = arguments.get("query", "")
         k = arguments.get("k", 5)

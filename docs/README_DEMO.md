@@ -134,10 +134,12 @@ npm run dev
 ## 4) Demo runbook (clicks)
 
 1. Open `http://127.0.0.1:5173`
-2. Startscherm toont 3 tegels:
+2. Startscherm toont 5 tegels:
    - Toeslagen Check
    - Bezwaar Assistent
    - Generatieve UI — Zoeken
+   - Generatieve UI — Wizard
+   - Generatieve UI — Formulier
 3. Elke run reset de surface (A2UI `surface/open`) zodat herhaalde runs weer duidelijk zichtbaar zijn.
 
 ### UI gedrag (wat je laat zien)
@@ -190,6 +192,35 @@ npm run dev
    - Voorbeelden van redenen: *Quota bereikt*, *Te veel verzoeken (HTTP 429)*, *Ongeldige JSON-output*.
 
 ---
+
+### Demo Flow 4 — Generatieve UI — Wizard (Decision Tree)
+1. Klik **Start** op *Generatieve UI — Wizard*
+2. Je ziet direct een **decision**-blok (vraag + opties). Klik door 3–5 stappen.
+3. Per stap zie je progressive updates:
+   - `MCP: bd_search (Nms)` → “Bronnen (MCP)”
+   - `A2A: next_node (Nms)` → volgende decision of adviesblokken
+4. Bovenin zie je **Pad:** meegroeien (state in orchestrator).
+5. Klik **Opnieuw starten** → terug naar stap 1 en pad reset.
+
+> Deze wizard is volledig deterministisch en werkt zonder Gemini.
+
+### Demo Flow 5 — Generatieve UI — Formulier (Form-on-the-fly)
+1. Klik **Start** op *Generatieve UI — Formulier*
+2. Typ een vraag, bijv.:
+   - “Ik wil uitstel van betaling aanvragen”
+   - “Ik wil bezwaar maken tegen een naheffing”
+   - “Ik wil een wijziging doorgeven voor toeslagen”
+3. Klik **Genereer formulier**
+4. Progressive updates:
+   - `MCP: bd_search (Nms)` → “Bronnen (MCP)”
+   - `A2A: compose_form (Nms)` → form-block verschijnt (velden + verstuurknop)
+5. Vul velden in en klik **Verstuur**
+6. Progressive updates:
+   - `MCP: validate_form (Nms)` → validatie (errors of OK)
+   - `A2A: explain_form (Nms)` → vervolgstappen (deterministisch)
+7. Je kunt fouten corrigeren en opnieuw versturen.
+
+> Dit formulier + validatie zijn deterministisch en werken zonder Gemini.
 
 ## 5) Troubleshooting (Windows)
 

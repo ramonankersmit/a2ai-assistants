@@ -18,6 +18,7 @@ Current surfaces in the web shell:
 - `bezwaar` — MCP extraction/classification + A2A structured response (Gemini optional)
 - `genui_search` — MCP `bd_search` + A2A `compose_ui` that returns UI blocks
 - `genui_tree` — MCP `bd_search` + A2A `next_node` that returns decision blocks (wizard)
+- `genui_form` — MCP `validate_form` + A2A `compose_form`/`explain_form` that returns form blocks
 
 The UI model includes status paths used across surfaces:
 - `/status/loading`, `/status/message`, `/status/step`, `/status/lastRefresh`
@@ -37,11 +38,11 @@ The UI model includes status paths used across surfaces:
 - **UI indicator:** concept response includes `[Bron: Gemini]` or `[Bron: Fallback]`.
 
 ### A2A GenUI Agent (port 8030)
-- **Capabilities:** `compose_ui`, `next_node`
+- **Capabilities:** `compose_ui`, `next_node`, `compose_form`, `explain_form`
 - **Input (compose_ui):** `{ query, citations }`
 - **Input (next_node):** `{ state, choice, citations }`
 - **Output (normalized by orchestrator):**
-  - `blocks`: list of UI blocks (allowed kinds in UI: `callout`, `citations`, `accordion`, `next_questions`, `notice`, `decision`)
+  - `blocks`: list of UI blocks (allowed kinds in UI: `callout`, `citations`, `accordion`, `next_questions`, `notice`, `decision`, `form`)
   - `ui_source`: `gemini` or `fallback`
   - `ui_source_reason`: reason code (e.g. `resource_exhausted`, `http_429`, `bad_json`)
 - **UI indicator:** pill `GenUI: Gemini/Fallback · ...` with a human-friendly reason label.

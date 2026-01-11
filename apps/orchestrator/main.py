@@ -155,7 +155,7 @@ async def _a2a_call_with_trace(
 # GenUI: defensive block validation (whitelist)
 # -----------------------
 
-GENUI_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice", "decision"}
+GENUI_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice", "decision", "form"}
 
 
 def _safe_str(value: Any, *, max_len: int = 4000) -> str:
@@ -219,6 +219,48 @@ def _sanitize_decision_options(options: Any, *, max_items: int = 6) -> List[str]
                 label = _safe_str(it, max_len=80)
             if label:
                 out.append(label)
+    return out
+
+
+
+def _sanitize_form_fields(fields: Any, *, max_fields: int = 10) -> List[Json]:
+    out: List[Json] = []
+    if not isinstance(fields, list):
+        return out
+    for f in fields[:max_fields]:
+        if not isinstance(f, dict):
+            continue
+        fid = _safe_str(f.get("id") or "", max_len=40)
+        if not fid:
+            continue
+        ftype = _safe_str(f.get("type") or "text", max_len=20).lower()
+        if ftype not in ("text", "number", "date", "email", "textarea", "select"):
+            ftype = "text"
+
+        options = f.get("options") or []
+        if not isinstance(options, list):
+            options = []
+        options_s: List[str] = []
+        for o in options[:12]:
+            label = _safe_str(o, max_len=80)
+            if label:
+                options_s.append(label)
+
+        out.append(
+            {
+                "id": fid,
+                "label": _safe_str(f.get("label") or fid, max_len=120),
+                "type": ftype,
+                "required": bool(f.get("required", False)),
+                "placeholder": _safe_str(f.get("placeholder") or "", max_len=160),
+                "pattern": _safe_str(f.get("pattern") or "", max_len=120),
+                "min": f.get("min"),
+                "max": f.get("max"),
+                "minLength": f.get("minLength"),
+                "maxLength": f.get("maxLength"),
+                "options": options_s,
+            }
+        )
     return out
 
 
@@ -287,6 +329,22 @@ def _sanitize_genui_blocks(blocks: Any, *, max_blocks: int = 12) -> List[Json]:
             )
             continue
 
+
+
+        if kind == "form":
+            out.append(
+                {
+                    "kind": "form",
+                    "title": _safe_str(b.get("title") or "Formulier", max_len=140),
+                    "formId": _safe_str(b.get("formId") or b.get("id") or "form", max_len=40),
+                    "description": _safe_str(b.get("description") or "", max_len=400),
+                    "submitLabel": _safe_str(b.get("submitLabel") or "Verstuur", max_len=60),
+                    "fields": _sanitize_form_fields(b.get("fields") or []),
+                }
+            )
+            continue
+
+
         if kind == "notice":
             out.append(
                 {
@@ -345,6 +403,8 @@ async def client_event(payload: Json = Body(...)):
             await _send_open_surface(sid, "bezwaar", "Bezwaar Assistent", _empty_surface_model("A2UI: Plak een bezwaarbrief en klik op Analyseer."))
         elif target == "genui_search":
             await _send_open_surface(sid, "genui_search", "Generatieve UI — Zoeken", _empty_surface_model("A2UI: Stel een vraag en klik op Zoek."))
+        elif target == "genui_form":
+            await _send_open_surface(sid, "genui_form", "Generatieve UI — Formulier", _empty_surface_model("A2UI: Stel een vraag en klik op Genereer formulier."))
         elif target == "genui_tree":
             await _send_open_surface(sid, "genui_tree", "Generatieve UI — Wizard", _empty_surface_model("A2UI: Start de wizard…"))
             asyncio.create_task(run_genui_tree_start_flow(sid, {}))
@@ -362,6 +422,14 @@ async def client_event(payload: Json = Body(...)):
 
     if name == "genui/search":
         asyncio.create_task(run_genui_search_flow(sid, data))
+        return {"ok": True}
+
+    if name == "genui/form_generate":
+        asyncio.create_task(run_genui_form_generate_flow(sid, data))
+        return {"ok": True}
+
+    if name == "genui/form_submit":
+        asyncio.create_task(run_genui_form_submit_flow(sid, data))
         return {"ok": True}
 
     if name == "genui_tree/start":
@@ -753,3 +821,176 @@ async def run_genui_tree_choose_flow(sid: str, inputs: Json) -> None:
         )
         await _set_results(sid, surface_id, merged)
         await _set_status(sid, surface_id, loading=False, message="A2UI: Kies een optie om door te gaan.", step="waiting")
+
+# -----------------------
+# Flow 5: GenUI Form (Form-on-the-fly) — deterministic A2A (compose_form/explain_form) + MCP validate_form
+# -----------------------
+
+def _form_default_state() -> Json:
+    return {"query": "", "citations": [], "form": None}
+
+
+async def _set_form_state(sid: str, surface_id: str, state: Json) -> None:
+    await hub.push_update_and_apply(sid, surface_id, [{"op": "replace", "path": "/form", "value": state}])
+
+
+def _extract_first_form_block(blocks: List[Json]) -> Optional[Json]:
+    for b in blocks:
+        if isinstance(b, dict) and b.get("kind") == "form":
+            return b
+    return None
+
+
+async def run_genui_form_generate_flow(sid: str, inputs: Json) -> None:
+    surface_id = "genui_form"
+    query = str(inputs.get("query", "")).strip()
+    if not query:
+        return
+
+    await _send_open_surface(sid, surface_id, "Generatieve UI — Formulier", _empty_surface_model("A2UI: Nieuwe run gestart…"))
+    await _sleep_tick()
+
+    await _set_form_state(sid, surface_id, _form_default_state())
+
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Formulier genereren…", step="start", source="", sourceReason="")
+    await _set_results(sid, surface_id, [])
+    await _sleep_tick()
+
+    # 1) MCP citations
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Bronnen ophalen (MCP)…", step="bd_search")
+    await _sleep_tick()
+
+    q = _boost_query(query)
+    search_resp = await _mcp_call_with_trace(sid, surface_id, "bd_search", {"query": q, "k": 5}, step="bd_search")
+    citations = search_resp.get("items", []) if isinstance(search_resp, dict) else []
+    citations_block: Json = {"kind": "citations", "title": "Bronnen (MCP)", "items": citations}
+
+    # 2) A2A compose_form (deterministic)
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Formulier opstellen (A2A)…", step="compose_form")
+    await _sleep_tick()
+
+    try:
+        resp = await _a2a_call_with_trace(sid, surface_id, a2a_genui, "compose_form", {"query": query, "citations": citations}, step="compose_form")
+        data = resp.get("data") if isinstance(resp, dict) else None
+        blocks_raw = (data.get("blocks") if isinstance(data, dict) else None) or []
+        ui_source = (data.get("ui_source") if isinstance(data, dict) else "") or "fallback"
+        ui_reason = (data.get("ui_source_reason") if isinstance(data, dict) else "") or "deterministic_form"
+
+        blocks = _sanitize_genui_blocks(blocks_raw)
+
+        merged: List[Json] = []
+        if citations:
+            merged.append(citations_block)
+        merged.extend(blocks)
+
+        form_block = _extract_first_form_block(blocks)
+        await _set_form_state(sid, surface_id, {"query": query, "citations": citations, "form": form_block})
+
+        await _set_status(sid, surface_id, source=str(ui_source), sourceReason=str(ui_reason))
+        await _set_results(sid, surface_id, _sanitize_genui_blocks(merged))
+        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. Vul het formulier in en klik op Verstuur.", step="waiting")
+    except Exception:
+        await _set_status(sid, surface_id, source="fallback", sourceReason="a2a_down_or_error")
+
+        form_block = {
+            "kind": "form",
+            "title": "Formulier (demo)",
+            "formId": "contact_v1",
+            "description": "Vul enkele gegevens in. Dit is een deterministische fallback.",
+            "submitLabel": "Verstuur",
+            "fields": [
+                {"id": "email", "label": "E-mailadres", "type": "email", "required": True, "placeholder": "naam@example.nl"},
+                {"id": "toelichting", "label": "Toelichting", "type": "textarea", "required": True, "placeholder": "Beschrijf kort uw vraag."},
+            ],
+        }
+
+        merged: List[Json] = []
+        if citations:
+            merged.append(citations_block)
+        merged.append({"kind": "notice", "title": "Formulier", "body": "A2A genui-agent niet bereikbaar; fallback actief."})
+        merged.append(form_block)
+
+        await _set_form_state(sid, surface_id, {"query": query, "citations": citations, "form": form_block})
+        await _set_results(sid, surface_id, _sanitize_genui_blocks(merged))
+        await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (Form fallback)", step="waiting")
+
+
+async def run_genui_form_submit_flow(sid: str, inputs: Json) -> None:
+    surface_id = "genui_form"
+    form_id = str(inputs.get("formId") or "").strip() or "form"
+    values = inputs.get("values") or {}
+    if not isinstance(values, dict):
+        values = {}
+    query = str(inputs.get("query") or "").strip()
+
+    s = await hub.get(sid)
+    if not s:
+        return
+    model = s.get_model(surface_id)
+    form_state = model.get("form") if isinstance(model, dict) else None
+    if not isinstance(form_state, dict):
+        form_state = _form_default_state()
+
+    citations = form_state.get("citations") or []
+    form_block = form_state.get("form")
+    if not isinstance(form_block, dict):
+        form_block = None
+
+    schema = []
+    if form_block and isinstance(form_block.get("fields"), list):
+        schema = form_block.get("fields") or []
+
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Validatie uitvoeren (MCP)…", step="validate_form", source="fallback", sourceReason="deterministic_form")
+    await _sleep_tick()
+
+    validate_resp = await _mcp_call_with_trace(sid, surface_id, "validate_form", {"schema": schema, "values": values}, step="validate_form")
+    ok = bool(validate_resp.get("ok")) if isinstance(validate_resp, dict) else False
+    errors = validate_resp.get("errors") if isinstance(validate_resp, dict) else []
+    if not isinstance(errors, list):
+        errors = []
+
+    if ok:
+        notice = {"kind": "notice", "title": "Ingediend (demo)", "body": "Uw gegevens zijn ontvangen (demo). Hieronder ziet u de vervolgstappen."}
+    else:
+        lines = ["Controleer uw invoer:"]
+        for e in errors[:8]:
+            if isinstance(e, dict):
+                fld = _safe_str(e.get("field") or "", max_len=40)
+                msg = _safe_str(e.get("message") or "Ongeldige waarde", max_len=120)
+                lines.append(f"- {fld}: {msg}")
+        notice = {"kind": "notice", "title": "Controleer invoer", "body": "\n".join(lines)}
+
+    await _set_status(sid, surface_id, loading=True, message="A2UI: Uitleg maken (A2A)…", step="explain_form", source="fallback", sourceReason="deterministic_form")
+    await _sleep_tick()
+
+    explain_blocks: List[Json] = []
+    try:
+        resp = await _a2a_call_with_trace(sid, surface_id, a2a_genui, "explain_form", {"query": query, "ok": ok, "errors": errors, "values": values, "formId": form_id}, step="explain_form")
+        data = resp.get("data") if isinstance(resp, dict) else None
+        blocks_raw = (data.get("blocks") if isinstance(data, dict) else None) or []
+        explain_blocks = _sanitize_genui_blocks(blocks_raw)
+    except Exception:
+        explain_blocks = [
+            {"kind": "callout", "title": "Vervolgstap (demo)", "body": "Ga verder met het verzamelen van relevante stukken en controleer de termijnen. (Deterministische fallback.)"}
+        ]
+
+    merged: List[Json] = []
+    if citations:
+        merged.append({"kind": "citations", "title": "Bronnen (MCP)", "items": citations})
+    merged.append(notice)
+    if form_block:
+        merged.append(form_block)
+    merged.extend(explain_blocks)
+
+    await _set_form_state(sid, surface_id, {"query": query or form_state.get("query") or "", "citations": citations, "form": form_block})
+    await _set_results(sid, surface_id, _sanitize_genui_blocks(merged))
+
+    await _set_status(
+        sid,
+        surface_id,
+        loading=False,
+        message=("A2UI: Klaar. (Formulier ingediend)" if ok else "A2UI: Klaar. Corrigeer de velden en verstuur opnieuw."),
+        step="done",
+        source="fallback",
+        sourceReason="deterministic_form",
+    )

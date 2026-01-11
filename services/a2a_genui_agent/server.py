@@ -44,7 +44,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice", "decision"}
+_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice", "decision", "form"}
 
 
 @app.on_event("startup")
@@ -61,7 +61,7 @@ async def agent_card():
         "name": "genui-agent",
         "description": "Composes UI blocks (A2UI-friendly) from search results (Gemini or fallback).",
         "url": "http://localhost:8030/",
-        "capabilities": ["compose_ui", "next_node"],
+        "capabilities": ["compose_ui", "next_node", "compose_form", "explain_form"],
         "protocol": "a2a-jsonrpc",
         "version": "0.1.6",
     }
@@ -464,7 +464,7 @@ async def jsonrpc(payload: Json = Body(...)):
 
     params = payload.get("params") or {}
     capability = params.get("capability")
-    if capability not in ("compose_ui", "next_node"):
+    if capability not in ("compose_ui", "next_node", "compose_form", "explain_form"):
         return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32602, "message": "Unknown capability"}}
 
     message = (params.get("message") or {})
@@ -476,6 +476,24 @@ async def jsonrpc(payload: Json = Body(...)):
     citations = data.get("citations") or []
     if not isinstance(citations, list):
         citations = []
+
+
+    if capability == "compose_form":
+        blocks = _fallback_form_blocks(query, citations)
+        result = {"blocks": blocks, "ui_source": "fallback", "ui_source_reason": "deterministic_form"}
+        log.info("capability=compose_form ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
+
+    if capability == "explain_form":
+        ok = bool(data.get("ok", False))
+        errors = data.get("errors") or []
+        if not isinstance(errors, list):
+            errors = []
+        blocks = _fallback_form_explain(query, ok, errors)
+        result = {"blocks": blocks, "ui_source": "fallback", "ui_source_reason": "deterministic_form_explain"}
+        log.info("capability=explain_form ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
+
 
     if capability == "next_node":
         state = data.get("state") or {}
