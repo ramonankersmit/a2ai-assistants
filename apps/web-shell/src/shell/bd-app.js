@@ -90,7 +90,30 @@ export class BdApp extends LitElement {
     };
   }
 
-  _pushStatusHistory(nextModel) {
+  
+
+_syncFormValuesWithSchema(nextModel) {
+  try {
+    const blocks = (getByPointer(nextModel, '/results') || []);
+    const arr = Array.isArray(blocks) ? blocks : [];
+    const form = arr.find(b => b && typeof b === 'object' && b.kind === 'form');
+    if (!form) return;
+
+    const formId = String(form.formId || form.id || 'form').trim() || 'form';
+    const fields = Array.isArray(form.fields) ? form.fields : [];
+    const allowed = new Set(fields.map(f => String(f?.id || '').trim()).filter(Boolean));
+
+    if (!this._formValues || !this._formValues[formId]) return;
+    const vals = this._formValues[formId];
+
+    Object.keys(vals).forEach((k) => {
+      if (!allowed.has(String(k))) delete vals[k];
+    });
+  } catch (e) {
+    // never break UI
+  }
+}
+_pushStatusHistory(nextModel) {
     const msg = getByPointer(nextModel, '/status/message') || '';
     const step = getByPointer(nextModel, '/status/step') || '';
     const lastRaw = getByPointer(nextModel, '/status/lastRefresh') || '';
@@ -121,6 +144,9 @@ export class BdApp extends LitElement {
       this.surfaceId = msg.surfaceId;
       this.title = msg.title || this.title;
       this.model = msg.dataModel || this.model;
+
+
+      if (this.surfaceId === 'genui_form') this._syncFormValuesWithSchema(this.model);
 
       // Backward compatible: ensure GenUI source fields exist
       if (!this.model.status) this.model.status = {};
@@ -161,6 +187,8 @@ if (this.surfaceId === 'genui_tree') {
       if (nextModel.status.sourceReason === undefined) nextModel.status.sourceReason = '';
       this.model = nextModel;
       this._pushStatusHistory(nextModel);
+
+      if (this.surfaceId === 'genui_form') this._syncFormValuesWithSchema(nextModel);
 
       this.requestUpdate();
       return;
@@ -632,6 +660,8 @@ _humanizeGenuiSourceReason(reasonRaw) {
   if (r.includes('bad_json') || (r.includes('json') && (r.includes('parse') || r.includes('decode') || r.includes('error')))) return { code: 'bad_json', label: 'Ongeldige JSON-output' };
   if (r.includes('deterministic_tree')) return { code: 'deterministic_tree', label: 'Deterministische wizard' };
   if (r.includes('deterministic_form_extend')) return { code: 'deterministic_form_extend', label: 'Formulier aangevuld' };
+  if (r.includes('extend_form')) return { code: 'extend_form', label: 'A2A formulier-uitbreiding' };
+  if (r.includes('a2a_down_or_error')) return { code: 'a2a_down_or_error', label: 'A2A fout/geen verbinding' };
   if (r.includes('deterministic_form_explain')) return { code: 'deterministic_form_explain', label: 'Deterministische vervolgstap' };
   if (r.includes('deterministic_form')) return { code: 'deterministic_form', label: 'Deterministisch formulier' };
   return { code: raw, label: raw };
@@ -683,7 +713,7 @@ _renderBlocks(blocks, opts = {}) {
     if (type === 'textarea') {
       return html`
         <div style="display:grid; gap:6px;">
-          <div class="small-muted"><b>${label}</b>${required ? ' *' : ''}</div>
+          <div class="small-muted"><b>${label}</b>${required ? ' *' : ''} ${f.badge ? html`<span class="pill" style="margin-left:8px;">${f.badge}</span>` : ''}</div>
           <textarea class="input" rows="4" .value=${String(v ?? '')} placeholder=${placeholder} @input=${onInput}></textarea>
         </div>
       `;
@@ -693,7 +723,7 @@ _renderBlocks(blocks, opts = {}) {
       const options = Array.isArray(f.options) ? f.options : [];
       return html`
         <div style="display:grid; gap:6px;">
-          <div class="small-muted"><b>${label}</b>${required ? ' *' : ''}</div>
+          <div class="small-muted"><b>${label}</b>${required ? ' *' : ''} ${f.badge ? html`<span class="pill" style="margin-left:8px;">${f.badge}</span>` : ''}</div>
           <select class="input" .value=${String(v ?? '')} @change=${onInput}>
             <option value="">—</option>
             ${options.map(o => html`<option value=${String(o)}>${o}</option>`)}
@@ -705,7 +735,7 @@ _renderBlocks(blocks, opts = {}) {
     const inputType = (type === 'email' || type === 'number' || type === 'date') ? type : 'text';
     return html`
       <div style="display:grid; gap:6px;">
-        <div class="small-muted"><b>${label}</b>${required ? ' *' : ''}</div>
+        <div class="small-muted"><b>${label}</b>${required ? ' *' : ''} ${f.badge ? html`<span class="pill" style="margin-left:8px;">${f.badge}</span>` : ''}</div>
         <input class="input" type=${inputType} .value=${String(v ?? '')} placeholder=${placeholder} @input=${onInput} />
       </div>
     `;
