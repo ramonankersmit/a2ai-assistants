@@ -100,6 +100,150 @@ def _fallback_blocks(query: str, citations: List[Json]) -> List[Json]:
 # Decision Tree Wizard (deterministic, no Gemini dependency)
 # -----------------------
 
+
+
+def _fallback_form_blocks(query: str, citations: List[Json]) -> List[Json]:
+    """Deterministische form-generator (demo). Returns a 'form' block + short guidance.
+
+    The MCP tool validate_form expects a schema list with fields that use:
+      - id, label, type, required, minLength/maxLength, pattern (optional)
+    """
+    q = (query or "").strip()
+    low = q.lower()
+
+    scenario = "algemeen"
+    if any(k in low for k in ["uitstel", "betalingsregeling", "betaal", "betalen"]):
+        scenario = "betaling"
+    elif any(k in low for k in ["bezwaar", "bezwaarschrift", "beroep"]):
+        scenario = "bezwaar"
+    elif "toeslag" in low or "toeslagen" in low:
+        scenario = "toeslagen"
+
+    fields: List[Json] = [
+        {
+            "id": "email",
+            "label": "E-mailadres",
+            "type": "email",
+            "required": True,
+            "placeholder": "naam@example.nl",
+        },
+        {
+            "id": "vraag",
+            "label": "Uw vraag",
+            "type": "text",
+            "required": True,
+            "minLength": 10,
+            "placeholder": "Omschrijf kort uw situatie of vraag (demo).",
+        },
+    ]
+
+    if scenario == "betaling":
+        fields += [
+            {
+                "id": "kenmerk",
+                "label": "Kenmerk / aanslagnummer",
+                "type": "text",
+                "required": True,
+                "minLength": 6,
+                "placeholder": "Bijv. 00.00.000.000 (placeholder).",
+            },
+            {
+                "id": "bedrag",
+                "label": "Bedrag (EUR)",
+                "type": "number",
+                "required": False,
+                "placeholder": "Bijv. 750",
+            },
+        ]
+    elif scenario == "bezwaar":
+        fields += [
+            {
+                "id": "kenmerk",
+                "label": "Kenmerk / aanslagnummer",
+                "type": "text",
+                "required": True,
+                "minLength": 6,
+                "placeholder": "Bijv. 00.00.000.000 (placeholder).",
+            },
+            {
+                "id": "motivering",
+                "label": "Kern van uw bezwaar",
+                "type": "text",
+                "required": True,
+                "minLength": 20,
+                "placeholder": "Waarom bent u het niet eens? (demo)",
+            },
+        ]
+    elif scenario == "toeslagen":
+        fields += [
+            {
+                "id": "regeling",
+                "label": "Regeling",
+                "type": "text",
+                "required": True,
+                "placeholder": "Bijv. huurtoeslag / zorgtoeslag (demo)",
+            },
+            {
+                "id": "jaar",
+                "label": "Jaar",
+                "type": "number",
+                "required": False,
+                "placeholder": "Bijv. 2025",
+            },
+        ]
+
+    intro: Json = {
+        "kind": "callout",
+        "title": "Formulier (demo)",
+        "body": (
+            "Vul een paar velden in. Dit formulier is dynamisch (GenUI), maar de validatie is deterministisch via MCP.\n"
+            "Gebruik geen persoonsgegevens; demo/placeholder is voldoende."
+        ),
+    }
+
+    form_block: Json = {
+        "kind": "form",
+        "title": "Gegevens",
+        "fields": fields,
+        "submit_label": "Verstuur",
+    }
+
+    return [intro, form_block]
+
+
+def _fallback_form_explain(query: str, ok: bool, errors: List[Json]) -> List[Json]:
+    """Deterministische uitleg/response na form-validatie (demo)."""
+    if not ok:
+        lines: List[str] = []
+        for e in errors or []:
+            if not isinstance(e, dict):
+                continue
+            msg = str(e.get("message") or "").strip()
+            if msg:
+                lines.append(f"- {msg}")
+        body = "Controleer de invoer:\n" + ("\n".join(lines) if lines else "- Onbekende validatiefout.")
+        return [
+            {"kind": "notice", "title": "Niet verstuurd", "body": body},
+            {"kind": "next_questions", "title": "Probeer ook", "items": [
+                "Welke gegevens zijn verplicht?",
+                "Kan ik ook uitstel of een betalingsregeling aanvragen?",
+                "Wat is het verschil tussen bezwaar en een klacht?"
+            ]},
+        ]
+
+    return [
+        {"kind": "notice", "title": "Ingediend (demo)", "body": "Uw formulier is (demo) ontvangen. In het echt krijgt u meestal een bevestiging."},
+        {"kind": "callout", "title": "Vervolgstappen (demo)", "body": (
+            "1) Bewaar het kenmerk/nummer dat bij uw zaak hoort.\n"
+            "2) Houd uw relevante documenten bij de hand.\n"
+            "3) Let op termijnen (bij bezwaar vaak 6 weken na dagtekening)."
+        )},
+        {"kind": "next_questions", "title": "Vervolgvraag", "items": [
+            "Hoe weet ik of bezwaar maken zinvol is?",
+            "Wat gebeurt er na het indienen?",
+            "Welke documenten zijn vaak relevant?"
+        ]},
+    ]
 def _tree_decision(title: str, question: str, options: List[str]) -> Json:
     return {"kind": "decision", "title": title, "question": question, "options": options}
 
