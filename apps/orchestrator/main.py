@@ -448,16 +448,6 @@ async def client_event(payload: Json = Body(...)):
         asyncio.create_task(run_toeslagen_flow(sid, data))
         return {"ok": True}
 
-    if name == "toeslagen/reset":
-        # Reset surface state (inputs are reset client-side; we reset status/results server-side)
-        await _send_open_surface(
-            sid,
-            "toeslagen",
-            "Toeslagen Check",
-            _empty_surface_model("A2UI: Vul de gegevens in en klik op Check."),
-        )
-        return {"ok": True}
-
     if name == "bezwaar/analyse":
         asyncio.create_task(run_bezwaar_flow(sid, data))
         return {"ok": True}
