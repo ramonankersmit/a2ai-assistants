@@ -656,6 +656,18 @@ async def run_genui_tree_choose_flow(sid: str, inputs: Json) -> None:
     if not isinstance(state, dict):
         state = _tree_default_state()
 
+    # Update the visible path immediately (UX): show the chosen option in the path while we work.
+    try:
+        path_in = state.get("path") or []
+        path = [str(x) for x in path_in if str(x).strip()]
+        if choice and (not path or path[-1] != choice):
+            path = (path + [choice])[:12]
+        preview_state = {**state, "path": path}
+        await _set_tree_state(sid, surface_id, preview_state)
+    except Exception:
+        # Never break the demo on UI-only enhancements.
+        pass
+
     await _set_status(sid, surface_id, loading=True, message=f"A2UI: Keuze ontvangen: {choice}", step="tree_choose")
     await _sleep_tick()
 

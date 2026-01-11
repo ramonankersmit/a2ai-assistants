@@ -578,6 +578,7 @@ if (this.surfaceId === 'genui_search' && this._pendingGenuiPrefill) {
 
   _renderBlocks(blocks) {
     const arr = Array.isArray(blocks) ? blocks : [];
+    const loading = !!getByPointer(this.model, '/status/loading');
     if (!arr.length) {
       return html`<div class="small-muted">Nog geen output. Stel een vraag en klik op “Zoek”.</div>`;
     }
@@ -660,7 +661,7 @@ if (this.surfaceId === 'genui_search' && this._pendingGenuiPrefill) {
               <div style="margin-top:6px;"><b>${question}</b></div>
               <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px;">
                 ${opts.map(opt => html`
-                  <button class="pill" style="cursor:pointer;" @click=${() => this._genuiTreeChoose(String(opt || ''))}>
+                  <button class="pill" style=${loading ? 'cursor:not-allowed; opacity:0.6;' : 'cursor:pointer;'} ?disabled=${loading} @click=${() => this._genuiTreeChoose(String(opt || ''))}>
                     ${opt}
                   </button>
                 `)}
@@ -803,7 +804,8 @@ _renderGenuiSearch() {
               <input class="input" id="genuiQuery" placeholder="Bijv. 'Hoe werkt bezwaar maken?'" />
 
               <div></div>
-              <div style="display:flex; justify-content:flex-end; gap:10px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+              <div class="small-muted">Pad: ${pathLabel}</div>
                 <button class="btn" style="min-width:140px;" ?disabled=${loading} @click=${this._genuiSearch}>Zoek</button>
               </div>
             </div>
@@ -823,6 +825,8 @@ _renderGenuiSearch() {
     const loading = !!getByPointer(this.model, '/status/loading');
     const blocks = (getByPointer(this.model, '/results') || []);
     const hasBlocks = Array.isArray(blocks) && blocks.length;
+    const path = getByPointer(this.model, '/tree/path') || [];
+    const pathLabel = Array.isArray(path) && path.length ? path.map(x => String(x)).join(' → ') : '—';
 
     return html`
       <div class="container">
@@ -841,7 +845,8 @@ _renderGenuiSearch() {
           </div>
 
           <div class="card-body">
-            <div style="display:flex; justify-content:flex-end; gap:10px;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+              <div class="small-muted">Pad: ${pathLabel}</div>
               <button class="btn" style="min-width:170px;" ?disabled=${loading} @click=${this._genuiTreeStart}>Opnieuw starten</button>
             </div>
 
