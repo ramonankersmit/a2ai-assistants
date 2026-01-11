@@ -1076,6 +1076,9 @@ async def run_genui_form_submit_flow(sid: str, inputs: Json) -> None:
         values = {}
     query = str(inputs.get("query") or "").strip()
 
+    ui_source = "fallback"
+    ui_reason = "deterministic_form_explain"
+
     s = await hub.get(sid)
     if not s:
         return
@@ -1120,6 +1123,8 @@ async def run_genui_form_submit_flow(sid: str, inputs: Json) -> None:
     try:
         resp = await _a2a_call_with_trace(sid, surface_id, a2a_genui, "explain_form", {"query": query, "ok": ok, "errors": errors, "values": values, "formId": form_id}, step="explain_form")
         data = _a2a_data_dict(resp)
+        ui_source = str(data.get('ui_source') or ui_source)
+        ui_reason = str(data.get('ui_source_reason') or ui_reason)
         blocks_raw = data.get('blocks') or []
         if isinstance(blocks_raw, dict):
             blocks_raw = [blocks_raw]
@@ -1130,15 +1135,6 @@ async def run_genui_form_submit_flow(sid: str, inputs: Json) -> None:
         ]
 
 
-
-ui_source = "fallback"
-ui_reason = "deterministic_form"
-try:
-    if 'data' in locals() and isinstance(data, dict):
-        ui_source = str(data.get("ui_source") or ui_source)
-        ui_reason = str(data.get("ui_source_reason") or ui_reason)
-except Exception:
-    pass
 
     merged: List[Json] = []
     if citations:

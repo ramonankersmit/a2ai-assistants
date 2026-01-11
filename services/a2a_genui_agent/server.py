@@ -640,36 +640,52 @@ async def jsonrpc(payload: Json = Body(...)):
 
 
 
-if capability == "extend_form":
-    # Deterministic helper for future "variant B" (server-side extension). Not required for the demo to work.
-    values = data.get("values") or {}
-    if not isinstance(values, dict):
-        values = {}
-    query_low = str(data.get("query") or "").lower()
+    if capability == "extend_form":
+        # Deterministic helper for future "variant B" (server-side extension). Not required for the demo to work.
+        values = data.get("values") or {}
+        if not isinstance(values, dict):
+            values = {}
+        query_low = str(data.get("query") or "").lower()
 
-    extra_fields: List[Json] = []
+        extra_fields: List[Json] = []
 
-    kenmerk = str(values.get("kenmerk") or "").strip()
-    if kenmerk and len(kenmerk) >= 6:
-        extra_fields.append({"id": "dagtekening", "label": "Dagtekening (op brief/aanslag)", "type": "date", "required": False})
+        kenmerk = str(values.get("kenmerk") or "").strip()
+        if kenmerk and len(kenmerk) >= 6:
+            extra_fields.append({"id": "dagtekening", "label": "Dagtekening (op brief/aanslag)", "type": "date", "required": False})
 
-    bedrag_raw = values.get("bedrag")
-    try:
-        bedrag = float(bedrag_raw) if bedrag_raw not in (None, "") else 0.0
-    except Exception:
-        bedrag = 0.0
-    if bedrag > 0:
-        extra_fields.append({"id": "voorkeur", "label": "Waar gaat uw verzoek over?", "type": "select", "required": False,
-                             "options": ["Uitstel aanvragen", "Betalingsregeling aanvragen", "Ik weet het niet"]})
-        extra_fields.append({"id": "reden", "label": "Korte toelichting (waarom nu lastig betalen?)", "type": "textarea", "required": False, "minLength": 15})
+        bedrag_raw = values.get("bedrag")
+        try:
+            bedrag = float(bedrag_raw) if bedrag_raw not in (None, "") else 0.0
+        except Exception:
+            bedrag = 0.0
+        if bedrag > 0:
+            extra_fields.append({
+                "id": "voorkeur",
+                "label": "Waar gaat uw verzoek over?",
+                "type": "select",
+                "required": False,
+                "options": ["Uitstel aanvragen", "Betalingsregeling aanvragen", "Ik weet het niet"],
+            })
+            extra_fields.append({
+                "id": "reden",
+                "label": "Korte toelichting (waarom nu lastig betalen?)",
+                "type": "textarea",
+                "required": False,
+                "minLength": 15,
+            })
 
-    if "bezwaar" in query_low or str(values.get("motivering") or "").strip():
-        extra_fields.append({"id": "route", "label": "Hoe wilt u het liefst indienen?", "type": "select", "required": False,
-                             "options": ["Online", "Per post", "Weet ik niet"]})
+        if "bezwaar" in query_low or str(values.get("motivering") or "").strip():
+            extra_fields.append({
+                "id": "route",
+                "label": "Hoe wilt u het liefst indienen?",
+                "type": "select",
+                "required": False,
+                "options": ["Online", "Per post", "Weet ik niet"],
+            })
 
-    result = {"extra_fields": extra_fields, "ui_source": "fallback", "ui_source_reason": "deterministic_form_extend"}
-    log.info("capability=extend_form ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
-    return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
+        result = {"extra_fields": extra_fields, "ui_source": "fallback", "ui_source_reason": "deterministic_form_extend"}
+        log.info("capability=extend_form ui_source=%s reason=%s", result.get("ui_source"), result.get("ui_source_reason"))
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"status": "ok", "data": result}}
 
     if capability == "next_node":
         state = data.get("state") or {}
