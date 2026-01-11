@@ -31,7 +31,7 @@ a2a_toes = A2AClient(A2A_TOESLAGEN_URL)
 a2a_bez = A2AClient(A2A_BEZWAAR_URL)
 a2a_genui = A2AClient(A2A_GENUI_URL)
 
-app = FastAPI(title="Belastingdienst Assistants Orchestrator", version="0.1.5")
+app = FastAPI(title="Belastingdienst Assistants Orchestrator", version="0.1.6")
 
 app.add_middleware(
     CORSMiddleware,
@@ -149,6 +149,130 @@ async def _a2a_call_with_trace(
     dt = _ms(time.perf_counter() - t0)
     await _set_status(sid, surface_id, loading=True, message=f"A2A: {capability} ({dt}ms)", step=step or capability)
     return result
+
+
+# -----------------------
+# GenUI: defensive block validation (whitelist)
+# -----------------------
+
+GENUI_ALLOWED_KINDS = {"callout", "citations", "accordion", "next_questions", "notice"}
+
+
+def _safe_str(value: Any, *, max_len: int = 4000) -> str:
+    s = "" if value is None else str(value)
+    s = s.strip()
+    if len(s) > max_len:
+        s = s[: max_len - 1] + "…"
+    return s
+
+
+def _sanitize_citations_items(items: Any, *, max_items: int = 10) -> List[Json]:
+    out: List[Json] = []
+    if not isinstance(items, list):
+        return out
+    for it in items[:max_items]:
+        if not isinstance(it, dict):
+            continue
+        out.append(
+            {
+                "title": _safe_str(it.get("title") or it.get("url") or ""),
+                "url": _safe_str(it.get("url") or ""),
+                "snippet": _safe_str(it.get("snippet") or "", max_len=800),
+            }
+        )
+    return out
+
+
+def _sanitize_qa_items(items: Any, *, max_items: int = 8) -> List[Json]:
+    out: List[Json] = []
+    if not isinstance(items, list):
+        return out
+    for it in items[:max_items]:
+        if not isinstance(it, dict):
+            continue
+        q = _safe_str(it.get("q") or it.get("question") or "", max_len=300)
+        a = _safe_str(it.get("a") or it.get("answer") or "", max_len=2000)
+        if not q and not a:
+            continue
+        out.append({"q": q, "a": a})
+    return out
+
+
+def _sanitize_next_questions(items: Any, *, max_items: int = 8) -> List[str]:
+    out: List[str] = []
+    if not isinstance(items, list):
+        return out
+    for it in items[:max_items]:
+        q = _safe_str(it, max_len=200)
+        if q:
+            out.append(q)
+    return out
+
+
+def _sanitize_genui_blocks(blocks: Any, *, max_blocks: int = 12) -> List[Json]:
+    """Accept only known block kinds and coerce fields to a safe shape."""
+    if not isinstance(blocks, list):
+        return []
+
+    out: List[Json] = []
+    for b in blocks[:max_blocks]:
+        if not isinstance(b, dict):
+            continue
+        kind = _safe_str(b.get("kind") or "").lower()
+        if kind not in GENUI_ALLOWED_KINDS:
+            continue
+
+        if kind == "callout":
+            out.append(
+                {
+                    "kind": "callout",
+                    "title": _safe_str(b.get("title") or "Kern", max_len=140),
+                    "body": _safe_str(b.get("body") or b.get("text") or "", max_len=4000),
+                }
+            )
+            continue
+
+        if kind == "citations":
+            out.append(
+                {
+                    "kind": "citations",
+                    "title": _safe_str(b.get("title") or "Bronnen", max_len=140),
+                    "items": _sanitize_citations_items(b.get("items") or []),
+                }
+            )
+            continue
+
+        if kind == "accordion":
+            out.append(
+                {
+                    "kind": "accordion",
+                    "title": _safe_str(b.get("title") or "Veelgestelde vragen", max_len=140),
+                    "items": _sanitize_qa_items(b.get("items") or []),
+                }
+            )
+            continue
+
+        if kind == "next_questions":
+            out.append(
+                {
+                    "kind": "next_questions",
+                    "title": _safe_str(b.get("title") or "Vervolgvraag", max_len=140),
+                    "items": _sanitize_next_questions(b.get("items") or []),
+                }
+            )
+            continue
+
+        if kind == "notice":
+            out.append(
+                {
+                    "kind": "notice",
+                    "title": _safe_str(b.get("title") or "Let op", max_len=140),
+                    "body": _safe_str(b.get("body") or "", max_len=1200),
+                }
+            )
+            continue
+
+    return out
 
 
 @app.get("/health")
@@ -346,8 +470,10 @@ async def run_genui_search_flow(sid: str, inputs: Json) -> None:
     search_resp = await _mcp_call_with_trace(sid, surface_id, "bd_search", {"query": query, "k": 5}, step="bd_search")
     citations = search_resp.get("items", []) if isinstance(search_resp, dict) else []
 
+    citations_block: Json = {"kind": "citations", "title": "Bronnen (MCP)", "items": citations}
+
     # progressive: show citations first
-    await _set_results(sid, surface_id, [{"kind": "citations", "title": "Bronnen (MCP)", "items": citations}])
+    await _set_results(sid, surface_id, [citations_block])
     await _sleep_tick()
 
     await _set_status(sid, surface_id, loading=True, message="A2UI: UI-plan maken (A2A)…", step="compose_ui")
@@ -368,17 +494,36 @@ async def run_genui_search_flow(sid: str, inputs: Json) -> None:
         if not isinstance(ui_data, dict):
             ui_data = {}
 
-        blocks = ui_data.get("blocks", [])
-        ui_source = str(ui_data.get("ui_source", "unknown"))
-        ui_reason = str(ui_data.get("ui_source_reason", ""))
+        blocks_raw = ui_data.get("blocks", [])
+        blocks = _sanitize_genui_blocks(blocks_raw)
 
-        if not isinstance(blocks, list):
-            blocks = []
+        # Prefer a single citations block from MCP (avoid duplicates from the agent output)
+        blocks = [b for b in blocks if b.get("kind") != "citations"]
+
+        ui_source = _safe_str(ui_data.get("ui_source", "unknown"), max_len=40).lower()
+        if ui_source not in ("gemini", "fallback"):
+            ui_source = "unknown"
+        ui_reason = _safe_str(ui_data.get("ui_source_reason", ""), max_len=80)
 
         await _set_status(sid, surface_id, source=ui_source, sourceReason=ui_reason)
-        await _set_results(sid, surface_id, blocks)
+
+        merged: List[Json] = []
+        if citations:
+            merged.append(citations_block)
+        merged.extend(blocks)
+
+        if len(merged) == (1 if citations else 0):
+            merged.append({"kind": "notice", "title": "GenUI", "body": "Geen GenUI-blokken gegenereerd; alleen bronnen getoond (demo)."})
+        await _set_results(sid, surface_id, merged)
+
         await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (GenUI)", step="done")
     except Exception:
         await _set_status(sid, surface_id, source="fallback", sourceReason="a2a_down_or_error")
-        await _set_results(sid, surface_id, [{"kind": "notice", "title": "GenUI", "body": "A2A genui-agent niet bereikbaar; fallback actief."}])
+
+        merged: List[Json] = []
+        if citations:
+            merged.append(citations_block)
+        merged.append({"kind": "notice", "title": "GenUI", "body": "A2A genui-agent niet bereikbaar; fallback actief."})
+        await _set_results(sid, surface_id, merged)
+
         await _set_status(sid, surface_id, loading=False, message="A2UI: Klaar. (GenUI fallback)", step="done")
